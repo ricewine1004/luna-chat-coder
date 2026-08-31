@@ -1,0 +1,102 @@
+name: Build Black Stigma Item AI v4
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - 'delivery/item-ai-v3/**'
+      - '.github/workflows/build-item-ai-v4.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow
+
+      - name: Apply v4 patch
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v4_patch.py
+
+      - name: Compile source check
+        shell: pwsh
+        run: |
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify fixes
+        shell: pwsh
+        run: |
+          $src = Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -notmatch "full_args = \['install'\]") { throw 'pip install command fix missing' }
+          if ($src -notmatch 'left_scroll=ttk.Scrollbar') { throw 'left scrollbar missing' }
+          if ($src -notmatch 'AI 엔진 설치 / 복구') { throw 'engine button missing' }
+          if ($src -notmatch '모델 다운로드 / 확인') { throw 'model button missing' }
+          if ($src -notmatch "WM_DELETE_WINDOW") { throw 'clean shutdown missing' }
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BlackStigmaItemAI `
+            --collect-all pip `
+            --hidden-import PIL._tkinter_finder `
+            delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist/BlackStigmaItemAI.exe')) { throw 'BlackStigmaItemAI.exe not found' }
+          Get-Item 'dist/BlackStigmaItemAI.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'dist/BlackStigmaItemAI.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item 'dist/BlackStigmaItemAI.exe' 'package/BlackStigmaItemAI.exe'
+          @'
+          검은 성흔 Item AI v4
+
+          수정사항
+          - AI 엔진 설치 오류 수정: pip install 명령을 정확히 사용
+          - 콘솔 없는 EXE에서도 pip 출력/오류를 app.log에 안전하게 기록
+          - 좌측 설정 패널 세로 스크롤 추가
+          - AI 엔진 설치 / 복구 및 모델 다운로드 / 확인 버튼 유지
+          - 종료 시 AI/GPU/리소스 정리 기능 유지
+
+          실행 순서
+          1. BlackStigmaItemAI.exe 실행
+          2. AI 엔진 설치 / 복구
+          3. 모델 다운로드 / 확인
+          4. 아이템 생성
+          '@ | Set-Content -Encoding UTF8 package/사용방법.txt
+          Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v4.zip -Force
+
+      - name: Publish public delivery release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'black-stigma-item-ai-v4-delivery'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag 'BlackStigmaItemAI_Windows_v4.zip' `
+            --target '${{ github.sha }}' `
+            --title 'Black Stigma Item AI Windows v4' `
+            --notes 'Fixes engine install failure and adds left-panel scrolling while preserving clean shutdown.'
