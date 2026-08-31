@@ -88,6 +88,14 @@ jobs:
           '@ | Set-Content -Encoding UTF8 package/사용방법.txt
           Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v4.zip -Force
 
+      - name: Upload direct-download artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-Windows-v4
+          path: BlackStigmaItemAI_Windows_v4.zip
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Publish public delivery release
         shell: pwsh
         env:
