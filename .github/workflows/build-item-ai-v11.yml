@@ -1,0 +1,126 @@
+name: Build Black Stigma Item AI v11
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - 'delivery/item-ai-v3/apply_v11_patch.py'
+      - '.github/workflows/build-item-ai-v11.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow huggingface_hub
+
+      - name: Apply v11 patch
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v11_patch.py
+
+      - name: Compile GUI source
+        shell: pwsh
+        run: |
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify v11 Black Stigma style lock
+        shell: pwsh
+        run: |
+          $src = Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -notmatch "APP='검은 성흔 Item AI v11'") { throw 'v11 title missing' }
+          if ($src -notmatch 'official Black Stigma dark fantasy ARPG item art direction') { throw 'Black Stigma core direction missing' }
+          if ($src -notmatch 'blackened iron, aged silver and weathered dark leather') { throw 'material language missing' }
+          if ($src -notmatch 'subtle engraved stigma runes') { throw 'stigma rune language missing' }
+          if ($src -notmatch 'controlled color palette; reserve saturated color for gameplay meaning') { throw 'controlled palette rule missing' }
+          if ($src -notmatch 'category_rules=') { throw 'category style rules missing' }
+          if ($src -notmatch 'rarity_rules=') { throw 'rarity style rules missing' }
+          if ($src -notmatch 'common rarity visual language') { throw 'common rarity rule missing' }
+          if ($src -notmatch 'legendary rarity visual language') { throw 'legendary rarity rule missing' }
+          if ($src -notmatch 'repeat the same stigma emblem family') { throw 'set consistency rule missing' }
+          if ($src -notmatch 'chibi, cute, kawaii, childish, preschool drawing') { throw 'anti-childish negative rule missing' }
+          if ($src -notmatch 'vivid ruby red to crimson healing liquid') { throw 'v10 health potion color rule lost' }
+          if ($src -notmatch 'luminous sapphire blue to cyan magical liquid') { throw 'v10 mana potion color rule lost' }
+          if ($src -notmatch '✅ 이미지 4장 생성 완료') { throw 'v10 completion log lost' }
+          if ($src -notmatch 'segmind/SSD-1B') { throw 'fast model profile lost' }
+          if ($src -notmatch 'local_dir=str\(root\)') { throw 'symlink-free local_dir lost' }
+          if ($src -notmatch 'left_scroll=ttk.Scrollbar') { throw 'left scroll lost' }
+          if ($src -notmatch 'WM_DELETE_WINDOW') { throw 'clean shutdown lost' }
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BlackStigmaItemAI `
+            --hidden-import PIL._tkinter_finder `
+            delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist/BlackStigmaItemAI.exe')) { throw 'BlackStigmaItemAI.exe not found' }
+          Get-Item 'dist/BlackStigmaItemAI.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'dist/BlackStigmaItemAI.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item 'dist/BlackStigmaItemAI.exe' 'package/BlackStigmaItemAI.exe'
+          @'
+          검은 성흔 Item AI v11
+
+          v11 핵심 변경
+          - 검은 성흔 전용 아트 디렉션을 모든 아이템 프롬프트에 공통 적용
+          - 흑철/에이징 실버/어두운 가죽 중심의 공통 재질 언어
+          - 성흔 룬, 절제된 가시 장식, 고대 흉터 문양 등 공통 디자인 언어
+          - 카테고리별 디자인 규칙 강화
+          - 일반/마법/희귀/고유/전설 등급별 시각 규칙 강화
+          - 유치한/장난감/치비/과도한 네온/현대적·SF 디자인 억제
+          - 세트 아이템은 같은 문양/금속 처리/테두리 기하/강조색 규칙 공유
+
+          v10 유지
+          - 생명력/마나/해독/강화/저항 물약의 기능별 액체 색상 고정
+          - 작업 성공 시 화면 로그의 ✅ 완료 표시
+          - 빠른 SSD-1B / 고품질 SDXL 선택
+          - symlink 없는 local_dir 모델 저장
+          - 외부 전용 Python worker
+          - 좌측 스크롤
+          - 종료 시 AI/GPU 프로세스 정리
+          '@ | Set-Content -Encoding UTF8 package/사용방법.txt
+          Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v11.zip -Force
+
+      - name: Upload direct-download artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-Windows-v11
+          path: BlackStigmaItemAI_Windows_v11.zip
+          retention-days: 1
+
+      - name: Publish public delivery release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag='black-stigma-item-ai-v11-delivery'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag 'BlackStigmaItemAI_Windows_v11.zip' `
+            --target '${{ github.sha }}' `
+            --title 'Black Stigma Item AI Windows v11' `
+            --notes 'Black Stigma style-lock: shared material language, category and rarity rules, set consistency, anti-childish negatives, while preserving v10 potion colors and completion logs.'
