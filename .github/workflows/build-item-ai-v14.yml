@@ -1,0 +1,168 @@
+name: Build Black Stigma Item AI v14
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - 'delivery/item-ai-v3/apply_v14_patch.py'
+      - '.github/workflows/build-item-ai-v14.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow huggingface_hub hf_xet
+
+      - name: Apply v14 patch
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v14_patch.py
+
+      - name: Compile GUI source
+        shell: pwsh
+        run: |
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify v14 download architecture
+        shell: pwsh
+        run: |
+          $src=Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -notmatch "APP='검은 성흔 Item AI v14'") { throw 'v14 title missing' }
+          if ($src -notmatch 'DOWNLOAD_TOTAL_BYTES=') { throw 'total byte progress missing' }
+          if ($src -notmatch 'DOWNLOAD_PROGRESS=') { throw 'download byte progress missing' }
+          if ($src -notmatch 'DOWNLOAD_RETRY=') { throw 'resume retry marker missing' }
+          if ($src -notmatch 'max_workers=8') { throw 'parallel workers missing' }
+          if ($src -notmatch 'hf_xet>=1.1,<2') { throw 'hf_xet install missing' }
+          if ($src -match "HF_HUB_DISABLE_XET']='1") { throw 'Xet is still disabled' }
+          if ($src -notmatch 'download_progress_var') { throw 'GUI progress bar missing' }
+          if ($src -notmatch '이미 설치된 공용 모델 사용') { throw 'skip-installed behavior missing' }
+          if ($src -notmatch 'SHARED_MODEL_ROOT') { throw 'shared model root missing' }
+          if ($src -notmatch 'TerminateJobObject') { throw 'v13 shutdown protection missing' }
+          if ($src -notmatch 'official Black Stigma dark fantasy ARPG item art direction') { throw 'v11 style lock missing' }
+
+      - name: Smoke test actual resumable local model download
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import importlib.util, subprocess, sys, tempfile, os
+          from pathlib import Path
+          src=Path('delivery/item-ai-v3/item_ai_app.py').resolve()
+          spec=importlib.util.spec_from_file_location('item_ai_v14',src)
+          mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+          td=Path(tempfile.mkdtemp(prefix='itemai_v14_dl_'))
+          worker=td/'worker.py';worker.write_text(mod.WORKER_CODE,encoding='utf-8')
+          env=os.environ.copy();env['PYTHONUTF8']='1';env['PYTHONIOENCODING']='utf-8';env['HF_HUB_DISABLE_SYMLINKS_WARNING']='1'
+          cmd=[sys.executable,str(worker),'download','--model-id','hf-internal-testing/tiny-stable-diffusion-pipe','--model-dir',str(td/'models')]
+          p=subprocess.run(cmd,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace',timeout=240)
+          print(p.stdout)
+          assert p.returncode==0,p.stdout
+          assert 'DOWNLOAD_TOTAL_BYTES=' in p.stdout,'total bytes not reported'
+          assert 'DOWNLOAD_PROGRESS=' in p.stdout,'progress not reported'
+          assert 'MODEL_READY=' in p.stdout,'model ready not reported'
+          root=td/'models'/'tiny-stable-diffusion-pipe'
+          assert (root/'model_index.json').is_file(),'model_index missing'
+          assert (root/'unet').exists() and (root/'vae').exists(),'model components missing'
+          for x in root.rglob('*'):
+              assert not x.is_symlink(),f'symlink found: {x}'
+          print('V14_DOWNLOAD_SMOKE_OK')
+          '@ | Set-Content -Encoding UTF8 $env:RUNNER_TEMP\test_v14_download.py
+          python $env:RUNNER_TEMP\test_v14_download.py
+
+      - name: Smoke test v13 parent-child process shutdown remains
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import importlib.util, subprocess, sys, tempfile, time, ctypes
+          from pathlib import Path
+          src=Path('delivery/item-ai-v3/item_ai_app.py').resolve()
+          spec=importlib.util.spec_from_file_location('item_ai_v14_shutdown',src)
+          mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+          td=Path(tempfile.mkdtemp(prefix='itemai_v14_proc_'));pidfile=td/'child.pid'
+          parent_code=("import subprocess,sys,time,pathlib;time.sleep(1);"+f"p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']);pathlib.Path(r'{pidfile}').write_text(str(p.pid));time.sleep(60)")
+          parent=subprocess.Popen([sys.executable,'-c',parent_code],creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+          mod._track_process(parent,'CI v14 parent-child tree')
+          deadline=time.time()+15
+          while time.time()<deadline and not pidfile.exists():time.sleep(0.2)
+          assert pidfile.exists(),'child pid file not created'
+          child_pid=int(pidfile.read_text())
+          mod.terminate_all_external_processes();parent.wait(timeout=5)
+          assert parent.poll() is not None,'parent still alive'
+          PROCESS_QUERY_LIMITED_INFORMATION=0x1000;STILL_ACTIVE=259
+          k32=ctypes.WinDLL('kernel32',use_last_error=True);k32.OpenProcess.restype=ctypes.c_void_p
+          h=k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,False,child_pid)
+          if h:
+              code=ctypes.c_uint32();k32.GetExitCodeProcess(h,ctypes.byref(code));k32.CloseHandle(h)
+              assert code.value!=STILL_ACTIVE,f'child still alive PID={child_pid}'
+          print('V14_PROCESS_TREE_SHUTDOWN_OK')
+          '@ | Set-Content -Encoding UTF8 $env:RUNNER_TEMP\test_v14_shutdown.py
+          python $env:RUNNER_TEMP\test_v14_shutdown.py
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BlackStigmaItemAI `
+            --hidden-import PIL._tkinter_finder `
+            delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist/BlackStigmaItemAI.exe')) { throw 'BlackStigmaItemAI.exe not found' }
+          Get-Item 'dist/BlackStigmaItemAI.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'dist/BlackStigmaItemAI.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item 'dist/BlackStigmaItemAI.exe' 'package/BlackStigmaItemAI.exe'
+          @'
+          검은 성흔 Item AI v14
+
+          모델 다운로드 개선
+          - 실제 바이트 기준 진행률(%) 표시
+          - 받은 용량 / 전체 용량 표시
+          - 실시간 다운로드 속도 표시
+          - 예상 남은 시간 표시
+          - 현재 다운로드 파일명 표시
+          - hf_xet 가속 모듈 자동 확인/최초 1회 설치
+          - local_dir 직접 저장 유지 (symlink 없음)
+          - 다운로드 중단/네트워크 오류 시 기존 파일 유지 후 최대 3회 이어받기 재시도
+          - 이미 설치된 공용 모델은 다운로드 즉시 생략
+          - 병렬 다운로드 worker 8개
+
+          기존 기능 유지
+          - D:\BlackStigmaItemAI_Models 공용 모델 재사용
+          - SSD-1B / SDXL 선택
+          - 검은 성흔 전용 스타일 고정
+          - 물약 기능별 색상 규칙
+          - 완료 로그
+          - Windows Job Object 기반 Python/AI 프로세스 트리 종료
+          '@ | Set-Content -Encoding UTF8 package/사용방법.txt
+          Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v14.zip -Force
+
+      - name: Upload direct-download artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-Windows-v14
+          path: BlackStigmaItemAI_Windows_v14.zip
+          retention-days: 1
