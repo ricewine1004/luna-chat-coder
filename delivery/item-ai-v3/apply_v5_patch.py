@@ -1,12 +1,13 @@
 from pathlib import Path
+import subprocess
+import sys
 
 p = Path(__file__).with_name('item_ai_app.py')
 s = p.read_text(encoding='utf-8')
 
 # v4 패치가 아직 적용되지 않은 소스에 먼저 적용합니다.
 if "APP='검은 성흔 Item AI v3'" in s:
-    ns = {}
-    exec(Path(__file__).with_name('apply_v4_patch.py').read_text(encoding='utf-8'), ns, ns)
+    subprocess.check_call([sys.executable, str(Path(__file__).with_name('apply_v4_patch.py'))])
     s = p.read_text(encoding='utf-8')
 
 # 필요한 표준 라이브러리 import 추가
@@ -81,9 +82,9 @@ def _download_file(url, dest, cb, label):
 
 def ensure_runtime(cb):
     if RUNTIME_PY.exists():
-        # 런타임 자체가 실제 실행 가능한지 확인합니다.
         try:
             _stream_process([RUNTIME_PY, '-c', 'import sys; print(sys.version)'], cb)
+            _stream_process([RUNTIME_PY, '-m', 'pip', '--version'], cb)
             return
         except Exception:
             cb('기존 Python 런타임이 손상되어 다시 준비합니다.')
@@ -98,7 +99,6 @@ def ensure_runtime(cb):
     with zipfile.ZipFile(runtime_zip, 'r') as zf:
         zf.extractall(RUNTIME)
 
-    # embeddable Python은 기본적으로 site 모듈 로딩이 비활성화되어 있으므로 pip 사용을 위해 활성화합니다.
     pth_files = list(RUNTIME.glob('python*._pth'))
     if not pth_files:
         raise RuntimeError('Python 런타임 설정 파일(*._pth)을 찾지 못했습니다.')
@@ -124,23 +124,21 @@ def pip_install(args, cb):
 '''
 s = s[:start] + new_block + s[end:]
 
-# 엔진 설치 전에 불완전한 패키지 타겟을 정리하고, 외부 Python pip를 사용하게 유지합니다.
+# 엔진 설치 전에 불완전한 패키지 타겟을 정리합니다.
 old = "        def work():\n            self.after(0,lambda:self.stat('AI 엔진 설치 중...')); cb=lambda s: log(s)\n            common=['--disable-pip-version-check','--no-warn-script-location','--upgrade','--target',str(PKG)]\n"
 new = "        def work():\n            self.after(0,lambda:self.stat('AI 엔진 설치 중...')); cb=lambda s: log(s)\n            if PKG.exists() and not engine_ready():\n                cb('이전 실패 설치 흔적을 정리합니다: '+str(PKG))\n                shutil.rmtree(PKG, ignore_errors=True)\n                PKG.mkdir(parents=True, exist_ok=True)\n            common=['--disable-pip-version-check','--no-warn-script-location','--upgrade','--target',str(PKG)]\n"
 if old not in s:
     raise SystemExit('install_engine block not found')
 s = s.replace(old, new, 1)
 
-# 버전 표시
 s = s.replace("APP='검은 성흔 Item AI v4'", "APP='검은 성흔 Item AI v5'")
 
-# 검증 표식
 required = [
     "RUNTIME_PY=RUNTIME/'python.exe'",
     "python-{RUNTIME_VERSION}-embed-amd64.zip",
     "GET_PIP_URL='https://bootstrap.pypa.io/get-pip.py'",
     "[RUNTIME_PY, '-m', 'pip', 'install']",
-    "subprocess.CREATE_NO_WINDOW",
+    "CREATE_NO_WINDOW",
     "left_scroll=ttk.Scrollbar",
     "AI 엔진 설치 / 복구",
     "모델 다운로드 / 확인",
