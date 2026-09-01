@@ -1,0 +1,168 @@
+name: Build Black Stigma Item AI v13
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - 'delivery/item-ai-v3/apply_v13_patch.py'
+      - '.github/workflows/build-item-ai-v13.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow huggingface_hub
+
+      - name: Apply v13 patch
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v13_patch.py
+
+      - name: Compile GUI source
+        shell: pwsh
+        run: |
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify v13 shutdown architecture
+        shell: pwsh
+        run: |
+          $src=Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -notmatch "APP='검은 성흔 Item AI v13'") { throw 'v13 title missing' }
+          if ($src -notmatch '_ACTIVE_PROCESSES=') { throw 'active process registry missing' }
+          if ($src -notmatch 'JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE') { throw 'kill-on-close job flag missing' }
+          if ($src -notmatch 'AssignProcessToJobObject') { throw 'job assignment missing' }
+          if ($src -notmatch 'TerminateJobObject') { throw 'job termination missing' }
+          if ($src -notmatch "_track_process\(proc,'AI worker") { throw 'AI worker process tracking missing' }
+          if ($src -notmatch "_track_process\(proc,'install/runtime'\)") { throw 'runtime process tracking missing' }
+          if ($src -notmatch 'atexit.register\(terminate_all_external_processes\)') { throw 'atexit cleanup missing' }
+          if ($src -notmatch '모든 외부 Python/AI 프로세스 종료 완료') { throw 'close cleanup call missing' }
+          if ($src -notmatch 'BlackStigmaItemAI_Models') { throw 'v12 shared model path missing' }
+          if ($src -notmatch 'official Black Stigma dark fantasy ARPG item art direction') { throw 'v11 style lock missing' }
+
+      - name: Smoke test real parent-child process tree shutdown
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import importlib.util, subprocess, sys, tempfile, time, ctypes
+          from pathlib import Path
+
+          src=Path('delivery/item-ai-v3/item_ai_app.py').resolve()
+          spec=importlib.util.spec_from_file_location('item_ai_v13',src)
+          mod=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+
+          td=Path(tempfile.mkdtemp(prefix='itemai_v13_'))
+          pidfile=td/'child.pid'
+          parent_code=(
+              "import subprocess,sys,time,pathlib;"
+              "time.sleep(1);"
+              f"p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']);"
+              f"pathlib.Path(r'{pidfile}').write_text(str(p.pid));"
+              "time.sleep(60)"
+          )
+          flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
+          parent=subprocess.Popen([sys.executable,'-c',parent_code],creationflags=flags)
+          mod._track_process(parent,'CI parent-child tree')
+          deadline=time.time()+15
+          while time.time()<deadline and not pidfile.exists(): time.sleep(0.2)
+          assert pidfile.exists(),'child pid file not created'
+          child_pid=int(pidfile.read_text())
+          print('parent=',parent.pid,'child=',child_pid)
+          mod.terminate_all_external_processes()
+          parent.wait(timeout=5)
+          assert parent.poll() is not None,'parent still alive'
+
+          PROCESS_QUERY_LIMITED_INFORMATION=0x1000
+          STILL_ACTIVE=259
+          k32=ctypes.WinDLL('kernel32',use_last_error=True)
+          k32.OpenProcess.argtypes=[ctypes.c_uint32,ctypes.c_int,ctypes.c_uint32]
+          k32.OpenProcess.restype=ctypes.c_void_p
+          k32.GetExitCodeProcess.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_uint32)]
+          k32.CloseHandle.argtypes=[ctypes.c_void_p]
+          h=k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,False,child_pid)
+          if h:
+              code=ctypes.c_uint32()
+              k32.GetExitCodeProcess(h,ctypes.byref(code))
+              k32.CloseHandle(h)
+              assert code.value!=STILL_ACTIVE,f'child still alive PID={child_pid}'
+          print('PROCESS_TREE_SHUTDOWN_OK')
+          '@ | Set-Content -Encoding UTF8 $env:RUNNER_TEMP\test_v13_shutdown.py
+          python $env:RUNNER_TEMP\test_v13_shutdown.py
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BlackStigmaItemAI `
+            --hidden-import PIL._tkinter_finder `
+            delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist/BlackStigmaItemAI.exe')) { throw 'BlackStigmaItemAI.exe not found' }
+          Get-Item 'dist/BlackStigmaItemAI.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'dist/BlackStigmaItemAI.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item 'dist/BlackStigmaItemAI.exe' 'package/BlackStigmaItemAI.exe'
+          @'
+          검은 성흔 Item AI v13
+
+          종료 안정화
+          - 설치/런타임 Python 프로세스 추적
+          - AI worker Python 프로세스 추적
+          - Windows Job Object Kill-on-close 적용
+          - 종료 시 worker의 자식 프로세스까지 프로세스 트리 전체 종료
+          - 외부 프로세스 종료 후 이미지/GUI 참조 및 GC 정리
+          - 비정상 Python 종료 경로를 위한 atexit 이중 안전장치
+
+          기존 유지
+          - 공용 엔진: 드라이브 루트 BlackStigmaItemAI_Engine
+          - 공용 모델: 드라이브 루트 BlackStigmaItemAI_Models
+          - 빠른 SSD-1B / 고품질 SDXL
+          - 검은 성흔 스타일 고정
+          - 물약 기능별 색상 규칙
+          - 완료 로그
+          '@ | Set-Content -Encoding UTF8 package/사용방법.txt
+          Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v13.zip -Force
+
+      - name: Upload direct-download artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-Windows-v13
+          path: BlackStigmaItemAI_Windows_v13.zip
+          retention-days: 1
+
+      - name: Publish public delivery release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag='black-stigma-item-ai-v13-delivery'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag 'BlackStigmaItemAI_Windows_v13.zip' `
+            --target '${{ github.sha }}' `
+            --title 'Black Stigma Item AI Windows v13' `
+            --notes 'Tracks and terminates all external Python AI/runtime process trees on exit using Windows Job Objects.'
