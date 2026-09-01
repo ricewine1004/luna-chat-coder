@@ -1,0 +1,137 @@
+name: Build Black Stigma Item AI v5
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - 'delivery/item-ai-v3/apply_v5_patch.py'
+      - '.github/workflows/build-item-ai-v5.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow
+
+      - name: Apply v5 patch
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v5_patch.py
+
+      - name: Compile source check
+        shell: pwsh
+        run: |
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify v5 architecture
+        shell: pwsh
+        run: |
+          $src = Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -match 'from pip._internal') { throw 'embedded pip usage still present' }
+          if ($src -notmatch "RUNTIME_PY=RUNTIME/'python.exe'") { throw 'external runtime missing' }
+          if ($src -notmatch "bootstrap.pypa.io/get-pip.py") { throw 'get-pip bootstrap missing' }
+          if ($src -notmatch "python-\{RUNTIME_VERSION\}-embed-amd64.zip") { throw 'embeddable Python download missing' }
+          if ($src -notmatch "\[RUNTIME_PY, '-m', 'pip', 'install'\]") { throw 'external pip install missing' }
+          if ($src -notmatch 'CREATE_NO_WINDOW') { throw 'hidden subprocess flag missing' }
+          if ($src -notmatch 'left_scroll=ttk.Scrollbar') { throw 'left scrollbar missing' }
+          if ($src -notmatch 'AI 엔진 설치 / 복구') { throw 'engine button missing' }
+          if ($src -notmatch '모델 다운로드 / 확인') { throw 'model button missing' }
+          if ($src -notmatch 'WM_DELETE_WINDOW') { throw 'clean shutdown missing' }
+
+      - name: Smoke test portable Python and pip bootstrap
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = '3.11.9'
+          $zip = Join-Path $env:RUNNER_TEMP 'python-embed.zip'
+          $rt = Join-Path $env:RUNNER_TEMP 'item-ai-runtime'
+          $gp = Join-Path $env:RUNNER_TEMP 'get-pip.py'
+          Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$ver/python-$ver-embed-amd64.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $rt -Force
+          $pth = Get-ChildItem $rt -Filter 'python*._pth' | Select-Object -First 1
+          if (-not $pth) { throw 'python _pth missing' }
+          $txt = Get-Content $pth.FullName -Raw
+          $txt = $txt -replace '#import site','import site'
+          Set-Content -Path $pth.FullName -Value $txt -Encoding ASCII
+          Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $gp
+          & "$rt\python.exe" $gp --disable-pip-version-check --no-warn-script-location
+          if ($LASTEXITCODE -ne 0) { throw 'get-pip failed' }
+          & "$rt\python.exe" -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw 'portable pip verification failed' }
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BlackStigmaItemAI `
+            --hidden-import PIL._tkinter_finder `
+            delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist/BlackStigmaItemAI.exe')) { throw 'BlackStigmaItemAI.exe not found' }
+          Get-Item 'dist/BlackStigmaItemAI.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'dist/BlackStigmaItemAI.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item 'dist/BlackStigmaItemAI.exe' 'package/BlackStigmaItemAI.exe'
+          @'
+          검은 성흔 Item AI v5
+
+          수정사항
+          - PyInstaller EXE 내부 pip 직접 실행 완전 제거
+          - 프로그램 전용 Python 3.11 런타임 자동 다운로드/복구
+          - 전용 Python에 정상 pip 부트스트랩 후 AI 엔진 설치
+          - cmd/PowerShell 창 없이 설치 프로세스 실행
+          - 실패한 engine_packages 자동 정리 후 재설치
+          - 좌측 패널 스크롤 유지
+          - AI 엔진/모델 다운로드 버튼 유지
+          - 종료 시 AI/GPU/프로세스 리소스 정리 유지
+
+          실행 순서
+          1. BlackStigmaItemAI.exe 실행
+          2. AI 엔진 설치 / 복구
+          3. 모델 다운로드 / 확인
+          4. 아이템 생성
+          '@ | Set-Content -Encoding UTF8 package/사용방법.txt
+          Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v5.zip -Force
+
+      - name: Upload direct-download artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-Windows-v5
+          path: BlackStigmaItemAI_Windows_v5.zip
+          retention-days: 1
+
+      - name: Publish public delivery release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'black-stigma-item-ai-v5-delivery'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag 'BlackStigmaItemAI_Windows_v5.zip' `
+            --target '${{ github.sha }}' `
+            --title 'Black Stigma Item AI Windows v5' `
+            --notes 'Replaces frozen pip with a dedicated portable Python runtime installer; preserves scrolling and clean shutdown.'
