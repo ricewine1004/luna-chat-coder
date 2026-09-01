@@ -1,0 +1,150 @@
+name: Build Black Stigma Item AI v7
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - 'delivery/item-ai-v3/apply_v7_patch.py'
+      - '.github/workflows/build-item-ai-v7.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow
+
+      - name: Apply v7 patch
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v7_patch.py
+
+      - name: Compile GUI and worker source
+        shell: pwsh
+        run: |
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+          @'
+          import ast
+          from pathlib import Path
+          p=Path('delivery/item-ai-v3/item_ai_app.py')
+          tree=ast.parse(p.read_text(encoding='utf-8'))
+          worker=None
+          for node in tree.body:
+              if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='WORKER_CODE' for t in node.targets):
+                  worker=ast.literal_eval(node.value)
+                  break
+          if not worker: raise SystemExit('WORKER_CODE not found')
+          compile(worker,'ai_worker.py','exec')
+          print('WORKER_COMPILE_OK')
+          '@ | Set-Content -Encoding UTF8 verify_worker.py
+          python verify_worker.py
+
+      - name: Verify v7 architecture
+        shell: pwsh
+        run: |
+          $src = Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -notmatch "APP='검은 성흔 Item AI v7'") { throw 'v7 version marker missing' }
+          if ($src -notmatch 'WORKER_CODE') { throw 'worker code missing' }
+          if ($src -notmatch 'run_worker\(') { throw 'worker runner missing' }
+          if ($src -notmatch 'MODEL_READY=') { throw 'external model download protocol missing' }
+          if ($src -notmatch 'RESULT_JSON=') { throw 'external generation protocol missing' }
+          if ($src -match 'activate_runtime_packages\(\); from huggingface_hub import snapshot_download') { throw 'GUI still imports huggingface_hub' }
+          if ($src -match 'activate_runtime_packages\(\); import torch; from diffusers') { throw 'GUI still imports diffusers/torch' }
+          if ($src -notmatch 'left_scroll=ttk.Scrollbar') { throw 'left scrollbar missing' }
+          if ($src -notmatch 'WM_DELETE_WINDOW') { throw 'clean shutdown missing' }
+
+      - name: Smoke test external runtime hmac and Hugging Face imports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ver='3.11.9'
+          $root='D:\BlackStigmaItemAI_Engine_Test'
+          $rt=Join-Path $root 'py311'
+          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $rt | Out-Null
+          $zip=Join-Path $env:RUNNER_TEMP 'py311.zip'
+          $gp=Join-Path $env:RUNNER_TEMP 'get-pip.py'
+          Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$ver/python-$ver-embed-amd64.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $rt -Force
+          $pth=Get-ChildItem $rt -Filter 'python*._pth' | Select-Object -First 1
+          $txt=Get-Content $pth.FullName -Raw
+          $txt=$txt -replace '#import site','import site'
+          Set-Content -Path $pth.FullName -Value $txt -Encoding ASCII
+          Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $gp
+          & "$rt\python.exe" $gp --disable-pip-version-check --no-warn-script-location
+          if ($LASTEXITCODE -ne 0) { throw 'get-pip failed' }
+          & "$rt\python.exe" -m pip install --disable-pip-version-check 'huggingface_hub>=0.24,<1' requests
+          if ($LASTEXITCODE -ne 0) { throw 'HF dependencies install failed' }
+          & "$rt\python.exe" -c 'import hmac,requests,urllib3; from huggingface_hub import snapshot_download; print("HF_HMAC_IMPORT_OK")'
+          if ($LASTEXITCODE -ne 0) { throw 'hmac/HF import smoke test failed' }
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BlackStigmaItemAI `
+            --hidden-import PIL._tkinter_finder `
+            delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist/BlackStigmaItemAI.exe')) { throw 'BlackStigmaItemAI.exe not found' }
+          Get-Item 'dist/BlackStigmaItemAI.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'dist/BlackStigmaItemAI.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item 'dist/BlackStigmaItemAI.exe' 'package/BlackStigmaItemAI.exe'
+          @'
+          검은 성흔 Item AI v7
+
+          핵심 수정
+          - 모델 다운로드를 PyInstaller GUI 내부에서 실행하지 않음
+          - 정상 전용 Python worker에서 Hugging Face 모델 다운로드 수행
+          - 이미지 생성/세트 생성/배경 제거도 외부 AI worker 프로세스로 수행
+          - hmac/ssl/requests 등 PyInstaller 표준 라이브러리 누락 문제 구조적으로 제거
+          - AI 작업 종료 시 worker 프로세스가 종료되어 GPU 리소스도 함께 반환
+          - 좌측 스크롤 및 엔진/모델 버튼 유지
+
+          실행 순서
+          1. BlackStigmaItemAI.exe 실행
+          2. AI 엔진 설치 / 복구 (v6에서 설치한 엔진이 있으면 재사용)
+          3. 모델 다운로드 / 확인
+          4. 아이템 생성
+          '@ | Set-Content -Encoding UTF8 package/사용방법.txt
+          Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v7.zip -Force
+
+      - name: Upload direct-download artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-Windows-v7
+          path: BlackStigmaItemAI_Windows_v7.zip
+          retention-days: 1
+
+      - name: Publish public delivery release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag='black-stigma-item-ai-v7-delivery'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag 'BlackStigmaItemAI_Windows_v7.zip' --target '${{ github.sha }}' --title 'Black Stigma Item AI Windows v7' --notes 'Runs Hugging Face download and AI inference in the dedicated external Python runtime instead of the frozen GUI process.'
