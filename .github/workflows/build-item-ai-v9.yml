@@ -1,0 +1,143 @@
+name: Build Black Stigma Item AI v9
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - 'delivery/item-ai-v3/apply_v9_patch.py'
+      - '.github/workflows/build-item-ai-v9.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow huggingface_hub
+
+      - name: Apply v9 patch
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v9_patch.py
+
+      - name: Compile GUI source
+        shell: pwsh
+        run: |
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify v9 architecture
+        shell: pwsh
+        run: |
+          $src = Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -notmatch "APP='검은 성흔 Item AI v9'") { throw 'v9 title missing' }
+          if ($src -notmatch 'segmind/SSD-1B') { throw 'fast SSD-1B model missing' }
+          if ($src -notmatch 'stabilityai/stable-diffusion-xl-base-1.0') { throw 'quality SDXL model missing' }
+          if ($src -notmatch '빠른 모델 설치 / 확인') { throw 'fast model button missing' }
+          if ($src -notmatch '고품질 SDXL 설치 / 확인') { throw 'quality model button missing' }
+          if ($src -notmatch '현재 생성 모델') { throw 'model selector missing' }
+          if ($src -notmatch 'model_profile_combo') { throw 'model profile combobox missing' }
+          if ($src -notmatch 'local_dir=str\(root\)') { throw 'symlink-free local_dir download missing' }
+          if ($src -notmatch 'local_files_only=True') { throw 'local-only generation missing' }
+          if ($src -notmatch 'left_scroll=ttk.Scrollbar') { throw 'left scrollbar missing' }
+          if ($src -notmatch 'WM_DELETE_WINDOW') { throw 'clean shutdown missing' }
+
+      - name: Smoke test profile metadata
+        shell: pwsh
+        run: |
+          $src = Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -notmatch "DEFAULT_PROFILE='빠른 모델 \(SSD-1B\)'") { throw 'fast model is not default' }
+          if ($src -notmatch "'steps':22") { throw 'fast model steps missing' }
+          if ($src -notmatch "'steps':28") { throw 'quality model steps missing' }
+
+      - name: Smoke test symlink-free local_dir download
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:HF_HUB_DISABLE_SYMLINKS_WARNING='1'
+          $env:HF_HUB_DISABLE_XET='1'
+          $dest=Join-Path $env:RUNNER_TEMP 'tiny-model-local'
+          @'
+          from huggingface_hub import snapshot_download
+          from pathlib import Path
+          import os
+          dest=Path(os.environ['TEST_DEST'])
+          p=snapshot_download(repo_id='hf-internal-testing/tiny-stable-diffusion-xl-pipe',local_dir=str(dest),local_dir_use_symlinks=False,max_workers=2)
+          assert (Path(p)/'model_index.json').is_file()
+          links=[x for x in Path(p).rglob('*') if x.is_symlink()]
+          assert not links, links
+          print('LOCAL_DIR_NO_SYMLINK_OK')
+          '@ | Set-Content -Encoding UTF8 $env:RUNNER_TEMP\test_local.py
+          $env:TEST_DEST=$dest
+          python $env:RUNNER_TEMP\test_local.py
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BlackStigmaItemAI `
+            --hidden-import PIL._tkinter_finder `
+            delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist/BlackStigmaItemAI.exe')) { throw 'BlackStigmaItemAI.exe not found' }
+          Get-Item 'dist/BlackStigmaItemAI.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'dist/BlackStigmaItemAI.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item 'dist/BlackStigmaItemAI.exe' 'package/BlackStigmaItemAI.exe'
+          @'
+          검은 성흔 Item AI v9
+
+          모델 구성
+          - 빠른 모델: segmind/SSD-1B (SDXL 계열 경량화 모델)
+          - 고품질 모델: stabilityai/stable-diffusion-xl-base-1.0
+          - 처음에는 빠른 모델만 설치해 즉시 테스트 가능
+          - 필요할 때 고품질 SDXL을 추가 설치 가능
+          - 생성 전에 현재 생성 모델을 선택 가능
+
+          기존 유지 기능
+          - symlink 없는 local_dir 모델 저장
+          - 외부 전용 Python worker 사용
+          - 좌측 스크롤
+          - 종료 시 AI/GPU 프로세스 정리
+          '@ | Set-Content -Encoding UTF8 package/사용방법.txt
+          Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v9.zip -Force
+
+      - name: Upload direct-download artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-Windows-v9
+          path: BlackStigmaItemAI_Windows_v9.zip
+          retention-days: 1
+
+      - name: Publish public delivery release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag='black-stigma-item-ai-v9-delivery'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag 'BlackStigmaItemAI_Windows_v9.zip' `
+            --target '${{ github.sha }}' `
+            --title 'Black Stigma Item AI Windows v9' `
+            --notes 'Adds fast SSD-1B and high-quality SDXL Base model profiles with separate installation and selection.'
