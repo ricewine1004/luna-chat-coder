@@ -1,0 +1,136 @@
+name: Build Black Stigma Item AI v8
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - 'delivery/item-ai-v3/apply_v8_patch.py'
+      - '.github/workflows/build-item-ai-v8.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow "huggingface_hub>=0.24,<1"
+
+      - name: Apply v8 patch
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v8_patch.py
+
+      - name: Compile GUI source
+        shell: pwsh
+        run: |
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify v8 architecture
+        shell: pwsh
+        run: |
+          $src = Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -notmatch "APP='검은 성흔 Item AI v8'") { throw 'v8 app marker missing' }
+          if ($src -notmatch 'local_dir=str\(root\)') { throw 'local_dir download missing' }
+          if ($src -notmatch 'local_dir_use_symlinks=False') { throw 'symlink disable missing' }
+          if ($src -notmatch 'local_files_only=True') { throw 'local-only model load missing' }
+          if ($src -match 'snapshot_download\(repo_id=a.model_id, cache_dir=a.model_dir\)') { throw 'legacy cache download remains' }
+          if ($src -match 'cache_dir=a.model_dir') { throw 'legacy cache model load remains' }
+          if ($src -notmatch 'HF_HUB_DISABLE_XET') { throw 'xet disable missing' }
+          if ($src -notmatch 'left_scroll=ttk.Scrollbar') { throw 'left scroll missing' }
+          if ($src -notmatch 'WM_DELETE_WINDOW') { throw 'clean shutdown missing' }
+
+      - name: Smoke test Hugging Face local_dir without symlinks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = Join-Path $env:RUNNER_TEMP 'hf-local-model'
+          $env:HF_HUB_DISABLE_SYMLINKS_WARNING='1'
+          $env:HF_HUB_DISABLE_XET='1'
+          @'
+          from pathlib import Path
+          from huggingface_hub import snapshot_download
+          import os
+          root=Path(os.environ['DEST'])
+          p=snapshot_download(
+              repo_id='hf-internal-testing/tiny-stable-diffusion-pipe',
+              local_dir=str(root),
+              local_dir_use_symlinks=False,
+              max_workers=2,
+          )
+          p=Path(p)
+          assert (p/'model_index.json').is_file(), p
+          for child in p.rglob('*'):
+              assert not child.is_symlink(), f'symlink found: {child}'
+          print('LOCAL_DIR_MODEL_OK')
+          print(p)
+          '@ | Set-Content -Encoding UTF8 $env:RUNNER_TEMP\test_local_model.py
+          $env:DEST=$dest
+          python $env:RUNNER_TEMP\test_local_model.py
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BlackStigmaItemAI `
+            --hidden-import PIL._tkinter_finder `
+            delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist/BlackStigmaItemAI.exe')) { throw 'BlackStigmaItemAI.exe not found' }
+          Get-Item 'dist/BlackStigmaItemAI.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'dist/BlackStigmaItemAI.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item 'dist/BlackStigmaItemAI.exe' 'package/BlackStigmaItemAI.exe'
+          @'
+          검은 성흔 Item AI v8
+
+          수정사항
+          - Hugging Face symlink 캐시 다운로드 방식 제거
+          - 모델을 실제 파일 local_dir 구조로 저장
+          - 관리자 권한/Windows 개발자 모드 없이 모델 다운로드 가능하도록 변경
+          - 모델 다운로드 후 model_index.json 및 필수 폴더 검증
+          - 이미지 생성 시 인터넷 캐시가 아닌 로컬 모델 폴더만 사용
+          - 외부 Python worker 방식 유지
+          - 좌측 스크롤/엔진 설치/모델 다운로드/종료 정리 유지
+          '@ | Set-Content -Encoding UTF8 package/사용방법.txt
+          Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v8.zip -Force
+
+      - name: Upload direct-download artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-Windows-v8
+          path: BlackStigmaItemAI_Windows_v8.zip
+          retention-days: 1
+
+      - name: Publish public delivery release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'black-stigma-item-ai-v8-delivery'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag 'BlackStigmaItemAI_Windows_v8.zip' `
+            --target '${{ github.sha }}' `
+            --title 'Black Stigma Item AI Windows v8' `
+            --notes 'Uses real local model files instead of Windows symlink cache; no Developer Mode/admin requirement.'
