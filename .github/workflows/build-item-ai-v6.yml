@@ -1,0 +1,143 @@
+name: Build Black Stigma Item AI v6
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - 'delivery/item-ai-v3/apply_v6_patch.py'
+      - '.github/workflows/build-item-ai-v6.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup build Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow
+
+      - name: Apply v6 patch
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v6_patch.py
+
+      - name: Compile source check
+        shell: pwsh
+        run: |
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify v6 architecture
+        shell: pwsh
+        run: |
+          $src = Get-Content 'delivery/item-ai-v3/item_ai_app.py' -Raw
+          if ($src -match "'--target',str\(PKG\)") { throw 'legacy target install still present' }
+          if ($src -notmatch 'BlackStigmaItemAI_Engine') { throw 'short engine root missing' }
+          if ($src -notmatch "RUNTIME_SITE=RUNTIME/'Lib'/'site-packages'") { throw 'runtime site-packages missing' }
+          if ($src -notmatch 'ENGINE_IMPORT_OK') { throw 'engine import verification missing' }
+          if ($src -notmatch 'PYTHONUTF8') { throw 'UTF-8 subprocess env missing' }
+          if ($src -notmatch 'left_scroll=ttk.Scrollbar') { throw 'left scrollbar missing' }
+          if ($src -notmatch 'AI 엔진 설치 / 복구') { throw 'engine button missing' }
+          if ($src -notmatch '모델 다운로드 / 확인') { throw 'model button missing' }
+          if ($src -notmatch 'WM_DELETE_WINDOW') { throw 'clean shutdown missing' }
+
+      - name: Smoke test short portable runtime with real Torch install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver='3.11.9'
+          $root='C:\BSIAI_RT_TEST'
+          $rt=Join-Path $root 'py311'
+          $zip=Join-Path $env:RUNNER_TEMP 'python-embed-v6.zip'
+          $gp=Join-Path $env:RUNNER_TEMP 'get-pip-v6.py'
+          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $rt | Out-Null
+          Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$ver/python-$ver-embed-amd64.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $rt -Force
+          $pth=Get-ChildItem $rt -Filter 'python*._pth' | Select-Object -First 1
+          $txt=Get-Content $pth.FullName -Raw
+          $txt=$txt -replace '#import site','import site'
+          Set-Content -Path $pth.FullName -Value $txt -Encoding ASCII
+          Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $gp
+          $env:PYTHONUTF8='1'
+          $env:PYTHONIOENCODING='utf-8'
+          & "$rt\python.exe" $gp --disable-pip-version-check --no-warn-script-location
+          if ($LASTEXITCODE -ne 0) { throw 'get-pip failed' }
+          & "$rt\python.exe" -m pip install --disable-pip-version-check --no-warn-script-location --upgrade torch
+          if ($LASTEXITCODE -ne 0) { throw 'real torch install failed' }
+          & "$rt\python.exe" -c "import torch; print('TORCH_IMPORT_OK', torch.__version__)"
+          if ($LASTEXITCODE -ne 0) { throw 'real torch import failed' }
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BlackStigmaItemAI `
+            --hidden-import PIL._tkinter_finder `
+            delivery/item-ai-v3/item_ai_app.py
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist/BlackStigmaItemAI.exe')) { throw 'BlackStigmaItemAI.exe not found' }
+          Get-Item 'dist/BlackStigmaItemAI.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'dist/BlackStigmaItemAI.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item 'dist/BlackStigmaItemAI.exe' 'package/BlackStigmaItemAI.exe'
+          @'
+          검은 성흔 Item AI v6
+
+          수정사항
+          - Windows 긴 경로 오류(WinError 206) 해결
+          - 엔진을 드라이브 루트의 짧은 경로 BlackStigmaItemAI_Engine에 설치
+          - pip --target 설치 방식 완전 제거
+          - 전용 Python Lib\site-packages에 직접 설치
+          - 설치 후 torch/diffusers/transformers 등 실제 import 검증
+          - 한글 경로 로그를 위한 UTF-8 subprocess 환경 적용
+          - 좌측 스크롤 유지
+          - 엔진/모델 다운로드 버튼 유지
+          - 종료 시 AI/GPU/프로세스 리소스 정리 유지
+
+          실행 순서
+          1. BlackStigmaItemAI.exe 실행
+          2. AI 엔진 설치 / 복구
+          3. 모델 다운로드 / 확인
+          4. 아이템 생성
+          '@ | Set-Content -Encoding UTF8 package/사용방법.txt
+          Compress-Archive -Path package/* -DestinationPath BlackStigmaItemAI_Windows_v6.zip -Force
+
+      - name: Upload direct-download artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-Windows-v6
+          path: BlackStigmaItemAI_Windows_v6.zip
+          retention-days: 1
+
+      - name: Publish public delivery release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag='black-stigma-item-ai-v6-delivery'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag 'BlackStigmaItemAI_Windows_v6.zip' `
+            --target '${{ github.sha }}' `
+            --title 'Black Stigma Item AI Windows v6' `
+            --notes 'Fixes Windows long-path engine install failure by using a short dedicated runtime path and normal site-packages install.'
