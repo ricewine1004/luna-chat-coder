@@ -11,7 +11,6 @@ if "APP='검은 성흔 Item AI v12'" not in s:
 if "APP='검은 성흔 Item AI v12'" not in s:
     raise SystemExit('v12 source was not prepared')
 
-# ctypes를 추가해 Windows Job Object로 외부 Python 프로세스 트리를 관리합니다.
 s=s.replace(
     'import os, sys, json, time, random, threading, traceback, importlib.util, gc, shutil, subprocess, urllib.request, zipfile',
     'import os, sys, json, time, random, threading, traceback, importlib.util, gc, shutil, subprocess, urllib.request, zipfile, ctypes, atexit',
@@ -57,8 +56,7 @@ class _JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
 
 
 def _create_kill_job_for_process(proc):
-    if os.name!='nt':
-        return None
+    if os.name!='nt': return None
     try:
         k32=ctypes.WinDLL('kernel32',use_last_error=True)
         k32.CreateJobObjectW.argtypes=[ctypes.c_void_p,ctypes.c_wchar_p]
@@ -68,44 +66,35 @@ def _create_kill_job_for_process(proc):
         k32.AssignProcessToJobObject.argtypes=[ctypes.c_void_p,ctypes.c_void_p]
         k32.AssignProcessToJobObject.restype=ctypes.c_int
         job=k32.CreateJobObjectW(None,None)
-        if not job:
-            return None
+        if not job: return None
         info=_JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
         info.BasicLimitInformation.LimitFlags=_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        ok=k32.SetInformationJobObject(job,_JobObjectExtendedLimitInformation,ctypes.byref(info),ctypes.sizeof(info))
-        if not ok:
+        if not k32.SetInformationJobObject(job,_JobObjectExtendedLimitInformation,ctypes.byref(info),ctypes.sizeof(info)):
             k32.CloseHandle(ctypes.c_void_p(job)); return None
-        ph=ctypes.c_void_p(int(proc._handle))
-        ok=k32.AssignProcessToJobObject(ctypes.c_void_p(job),ph)
-        if not ok:
+        if not k32.AssignProcessToJobObject(ctypes.c_void_p(job),ctypes.c_void_p(int(proc._handle))):
             k32.CloseHandle(ctypes.c_void_p(job)); return None
         return int(job)
     except Exception as e:
-        log('Job Object 생성 실패(terminate fallback 사용): '+str(e))
-        return None
+        log('Job Object 생성 실패(terminate fallback 사용): '+str(e)); return None
 
 
 def _track_process(proc,label='external'):
     job=_create_kill_job_for_process(proc)
-    with _ACTIVE_PROCESS_LOCK:
-        _ACTIVE_PROCESSES[proc.pid]=(proc,job,label)
+    with _ACTIVE_PROCESS_LOCK: _ACTIVE_PROCESSES[proc.pid]=(proc,job,label)
     log(f'외부 프로세스 등록: {label} PID={proc.pid}')
     return proc
 
 
 def _close_job_handle(job):
     if not job or os.name!='nt': return
-    try:
-        ctypes.WinDLL('kernel32',use_last_error=True).CloseHandle(ctypes.c_void_p(job))
+    try: ctypes.WinDLL('kernel32',use_last_error=True).CloseHandle(ctypes.c_void_p(job))
     except Exception: pass
 
 
 def _untrack_process(proc):
-    with _ACTIVE_PROCESS_LOCK:
-        entry=_ACTIVE_PROCESSES.pop(getattr(proc,'pid',-1),None)
+    with _ACTIVE_PROCESS_LOCK: entry=_ACTIVE_PROCESSES.pop(getattr(proc,'pid',-1),None)
     if entry:
-        _close_job_handle(entry[1])
-        log(f'외부 프로세스 해제: {entry[2]} PID={proc.pid}')
+        _close_job_handle(entry[1]); log(f'외부 프로세스 해제: {entry[2]} PID={proc.pid}')
 
 
 def _terminate_tracked_entry(proc,job,label):
@@ -118,8 +107,7 @@ def _terminate_tracked_entry(proc,job,label):
             k32.TerminateJobObject.argtypes=[ctypes.c_void_p,ctypes.c_uint32]
             k32.TerminateJobObject.restype=ctypes.c_int
             k32.TerminateJobObject(ctypes.c_void_p(job),1)
-        except Exception as e:
-            log('Job Object 종료 오류: '+str(e))
+        except Exception as e: log('Job Object 종료 오류: '+str(e))
     else:
         try: proc.terminate()
         except Exception: pass
@@ -135,36 +123,21 @@ def _terminate_tracked_entry(proc,job,label):
 
 def terminate_all_external_processes():
     with _ACTIVE_PROCESS_LOCK:
-        entries=list(_ACTIVE_PROCESSES.values())
-        _ACTIVE_PROCESSES.clear()
-    for proc,job,label in entries:
-        _terminate_tracked_entry(proc,job,label)
+        entries=list(_ACTIVE_PROCESSES.values()); _ACTIVE_PROCESSES.clear()
+    for proc,job,label in entries: _terminate_tracked_entry(proc,job,label)
     gc.collect()
-
 
 atexit.register(terminate_all_external_processes)
 '''
 if insert not in s: raise SystemExit('process tracker insertion point missing')
 s=s.replace(insert,insert+tracker,1)
 
-# 설치/런타임 프로세스도 추적하도록 _stream_process 전체를 교체합니다.
 start=s.index('def _stream_process(cmd, cb, cwd=None):')
 end=s.index('\n\ndef _download_file(',start)
 new_stream=r'''def _stream_process(cmd, cb, cwd=None):
     cb('실행: ' + ' '.join(str(x) for x in cmd))
-    env=os.environ.copy()
-    env['PYTHONUTF8']='1';env['PYTHONIOENCODING']='utf-8';env['PIP_DISABLE_PIP_VERSION_CHECK']='1'
-    proc = subprocess.Popen(
-        [str(x) for x in cmd],
-        cwd=str(cwd) if cwd else None,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        **_hidden_subprocess_kwargs(),
-    )
+    env=os.environ.copy();env['PYTHONUTF8']='1';env['PYTHONIOENCODING']='utf-8';env['PIP_DISABLE_PIP_VERSION_CHECK']='1'
+    proc=subprocess.Popen([str(x) for x in cmd],cwd=str(cwd) if cwd else None,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace',**_hidden_subprocess_kwargs())
     _track_process(proc,'install/runtime')
     try:
         assert proc.stdout is not None
@@ -182,12 +155,8 @@ new_stream=r'''def _stream_process(cmd, cb, cwd=None):
 '''
 s=s[:start]+new_stream+s[end:]
 
-# AI worker도 등록/해제하여 종료 시 즉시 프로세스 트리를 제거합니다.
 start=s.index('def run_worker(args, cb, result_prefix=None):')
-# 다음 클래스 App 직전까지 run_worker가 마지막 worker 함수입니다.
-end=s.index('\nclass App(tk.Tk):',start)
-old_tail=s[start:end]
-# preserve any helpers after run_worker? v12 worker block has run_worker as last function, so replace only function to end marker.
+end=s.index('\ndef _hidden_subprocess_kwargs():',start)
 new_run=r'''def run_worker(args, cb, result_prefix=None):
     ensure_runtime(cb)
     ensure_worker()
@@ -203,8 +172,7 @@ new_run=r'''def run_worker(args, cb, result_prefix=None):
             line=line.rstrip()
             if not line: continue
             cb(line)
-            if result_prefix and line.startswith(result_prefix):
-                result=line[len(result_prefix):]
+            if result_prefix and line.startswith(result_prefix): result=line[len(result_prefix):]
         rc=proc.wait()
         if rc!=0: raise RuntimeError(f'AI 작업 프로세스 실패 (코드 {rc})')
         return result
@@ -214,10 +182,8 @@ new_run=r'''def run_worker(args, cb, result_prefix=None):
         except Exception: pass
         _untrack_process(proc)
 '''
-# retain text before run_worker? replacement range only run_worker to class, should be safe.
 s=s[:start]+new_run+s[end:]
 
-# 종료 시 프로세스 트리를 메모리/GUI 정리보다 먼저 종료합니다.
 start=s.index('    def on_close(self):')
 end=s.index('\nif __name__==\'__main__\':',start)
 new_close=r'''    def on_close(self):
@@ -226,40 +192,20 @@ new_close=r'''    def on_close(self):
         try:self.status.config(text='외부 AI 프로세스 종료 중...');self.update_idletasks()
         except Exception:pass
         try:
-            terminate_all_external_processes()
-            log('모든 외부 Python/AI 프로세스 종료 완료')
-        except Exception as e:
-            log('외부 프로세스 종료 오류: '+str(e))
+            terminate_all_external_processes();log('모든 외부 Python/AI 프로세스 종료 완료')
+        except Exception as e:log('외부 프로세스 종료 오류: '+str(e))
         try:
-            self.pipe=None;self.pipe_id=None
-            self.images=[None]*4;self.meta=[None]*4;self.refs=[None]*4
+            self.pipe=None;self.pipe_id=None;self.images=[None]*4;self.meta=[None]*4;self.refs=[None]*4
             gc.collect();log('이미지/GUI/AI 참조 해제 완료')
         except Exception as e:log('참조 해제 오류: '+str(e))
         try:self.quit();self.destroy()
-        finally:
-            gc.collect();log('프로그램 종료 완료')
+        finally:gc.collect();log('프로그램 종료 완료')
 '''
 s=s[:start]+new_close+s[end:]
 
 s=s.replace("APP='검은 성흔 Item AI v12'","APP='검은 성흔 Item AI v13'",1)
-
-required=[
-    "APP='검은 성흔 Item AI v13'",
-    '_ACTIVE_PROCESSES={}',
-    '_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE',
-    'AssignProcessToJobObject',
-    'TerminateJobObject',
-    "_track_process(proc,'AI worker ",
-    "_track_process(proc,'install/runtime')",
-    'terminate_all_external_processes()',
-    'atexit.register(terminate_all_external_processes)',
-    'BlackStigmaItemAI_Models',
-    'official Black Stigma dark fantasy ARPG item art direction',
-    'vivid ruby red to crimson healing liquid',
-    '✅ 이미지 4장 생성 완료',
-]
+required=["APP='검은 성흔 Item AI v13'",'_ACTIVE_PROCESSES={}','_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE','AssignProcessToJobObject','TerminateJobObject',"_track_process(proc,'AI worker ","_track_process(proc,'install/runtime')",'terminate_all_external_processes()','atexit.register(terminate_all_external_processes)','BlackStigmaItemAI_Models','official Black Stigma dark fantasy ARPG item art direction','vivid ruby red to crimson healing liquid','✅ 이미지 4장 생성 완료']
 for marker in required:
     if marker not in s: raise SystemExit('v13 marker missing: '+marker)
-
 p.write_text(s,encoding='utf-8')
 print('Item AI v13 complete process shutdown patch applied')
