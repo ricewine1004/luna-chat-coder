@@ -6,6 +6,7 @@ on:
       - delivery-item-ai-v4
     paths:
       - 'delivery/item-ai-v3/apply_v9_patch.py'
+      - 'delivery/item-ai-v3/apply_v9_fix.py'
       - '.github/workflows/build-item-ai-v9.yml'
   workflow_dispatch:
 
@@ -33,6 +34,7 @@ jobs:
         shell: pwsh
         run: |
           python delivery/item-ai-v3/apply_v9_patch.py
+          python delivery/item-ai-v3/apply_v9_fix.py
 
       - name: Compile GUI source
         shell: pwsh
