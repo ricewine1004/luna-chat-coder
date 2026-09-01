@@ -1,0 +1,36 @@
+name: Export Black Stigma Item AI v14 source
+
+on:
+  push:
+    branches:
+      - delivery-item-ai-v4
+    paths:
+      - '.github/workflows/export-item-ai-v14-source.yml'
+  workflow_dispatch:
+
+jobs:
+  export-source:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply v14 patches
+        shell: pwsh
+        run: |
+          python delivery/item-ai-v3/apply_v14_patch.py
+          python -m py_compile delivery/item-ai-v3/item_ai_app.py
+      - name: Prepare source snapshot
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path export | Out-Null
+          Copy-Item delivery/item-ai-v3/item_ai_app.py export/item_ai_app.py
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackStigmaItemAI-v14-source
+          path: export/item_ai_app.py
+          retention-days: 1
