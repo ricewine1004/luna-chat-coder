@@ -19,7 +19,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
 public class ReminderReceiver extends BroadcastReceiver {
-    private static final String SOUND_CHANNEL_ID = "mydesk_signature_sound_v3";
+    public static final String SOUND_CHANNEL_ID = "mydesk_signature_sound_v3";
     private static final String OLD_SOUND_CHANNEL_ID_V2 = "mydesk_reminders_sound_v2";
     private static final String OLD_SOUND_CHANNEL_ID_V1 = "mydesk_reminders_sound_v1";
 
