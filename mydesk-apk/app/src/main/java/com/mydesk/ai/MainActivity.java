@@ -44,6 +44,7 @@ public class MainActivity extends android.app.Activity {
         if (launchReminderId == null) launchReminderId = "";
         if (launchReminderTitle == null) launchReminderTitle = "";
         createNotificationChannel();
+        ReminderReceiver.ensureSoundChannel(this);
         requestNotificationPermission();
         ReminderSyncJobService.schedule(this);
         ReminderSyncJobService.syncNow(this);
@@ -58,7 +59,7 @@ public class MainActivity extends android.app.Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.2.4");
+        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.2.6");
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new NativeBridge(), "MyDeskNative");
         webView.setWebViewClient(new WebViewClient() {
