@@ -10,8 +10,8 @@ android {
         applicationId 'com.mydesk.ai'
         minSdk 26
         targetSdk 35
-        versionCode 20900
-        versionName '0.2.9'
+        versionCode 30000
+        versionName '0.3.0'
     }
 
     buildTypes {
