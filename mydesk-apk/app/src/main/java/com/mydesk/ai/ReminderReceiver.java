@@ -19,7 +19,8 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
 public class ReminderReceiver extends BroadcastReceiver {
-    private static final String SOUND_CHANNEL_ID = "mydesk_reminders_sound_v1";
+    private static final String SOUND_CHANNEL_ID = "mydesk_reminders_sound_v2";
+    private static final String OLD_SOUND_CHANNEL_ID = "mydesk_reminders_sound_v1";
 
     @Override public void onReceive(Context context, Intent intent) {
         ensureSoundChannel(context);
@@ -52,23 +53,18 @@ public class ReminderReceiver extends BroadcastReceiver {
         PendingIntent snooze = PendingIntent.getBroadcast(context, id.hashCode() ^ 0x7722, snoozeIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-        Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                ? new Notification.Builder(context, SOUND_CHANNEL_ID)
-                : new Notification.Builder(context);
-        b.setSmallIcon(android.R.drawable.ic_dialog_info)
+        Notification.Builder b = new Notification.Builder(context, SOUND_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("MyDesk AI")
                 .setContentText(title)
                 .setStyle(new Notification.BigTextStyle().bigText(title))
                 .setAutoCancel(true)
                 .setContentIntent(content)
+                .setPriority(Notification.PRIORITY_HIGH)
+                .setCategory(Notification.CATEGORY_REMINDER)
                 .addAction(new Notification.Action.Builder(null, "완료", complete).build())
                 .addAction(new Notification.Action.Builder(null, "10분 미루기", snooze).build())
                 .setColor(Color.rgb(108, 92, 231));
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            b.setSound(Settings.System.DEFAULT_NOTIFICATION_URI);
-            b.setVibrate(new long[]{0, 180, 90, 180});
-        }
 
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(id.hashCode(), b.build());
@@ -77,10 +73,17 @@ public class ReminderReceiver extends BroadcastReceiver {
         if (next > 0) ReminderScheduler.schedule(context, id, title, next, repeatRule);
     }
 
-    private void ensureSoundChannel(Context context) {
+    public static void ensureSoundChannel(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationManager nm = context.getSystemService(NotificationManager.class);
-        if (nm == null || nm.getNotificationChannel(SOUND_CHANNEL_ID) != null) return;
+        if (nm == null) return;
+
+        // Android notification channel sound/vibration settings are immutable after creation.
+        // v2 uses a fresh channel so users upgrading from a silent v1 channel get sound again.
+        if (nm.getNotificationChannel(OLD_SOUND_CHANNEL_ID) != null) {
+            nm.deleteNotificationChannel(OLD_SOUND_CHANNEL_ID);
+        }
+        if (nm.getNotificationChannel(SOUND_CHANNEL_ID) != null) return;
 
         Uri soundUri = Settings.System.DEFAULT_NOTIFICATION_URI;
         AudioAttributes attributes = new AudioAttributes.Builder()
@@ -90,14 +93,16 @@ public class ReminderReceiver extends BroadcastReceiver {
 
         NotificationChannel channel = new NotificationChannel(
                 SOUND_CHANNEL_ID,
-                "MyDesk AI 알림음",
+                "MyDesk AI 소리·진동 알림",
                 NotificationManager.IMPORTANCE_HIGH
         );
-        channel.setDescription("MyDesk AI 일정, 할 일, 미리 알림");
+        channel.setDescription("MyDesk AI 일정, 할 일, 미리 알림 - 소리와 진동 사용");
         channel.enableVibration(true);
-        channel.setVibrationPattern(new long[]{0, 180, 90, 180});
+        channel.setVibrationPattern(new long[]{0, 250, 120, 250, 120, 350});
+        channel.enableLights(true);
         channel.setLightColor(Color.rgb(108, 92, 231));
         channel.setSound(soundUri, attributes);
+        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         nm.createNotificationChannel(channel);
     }
 
