@@ -2,13 +2,17 @@ package com.mydesk.ai;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -32,7 +36,7 @@ public class VoiceAssistantActivity extends Activity {
         root.setBackgroundColor(Color.WHITE);
 
         TextView title = new TextView(this);
-        title.setText("MyDesk AI");
+        title.setText("MyDesk AI 음성호출");
         title.setTextSize(22f);
         title.setTextColor(Color.rgb(45, 45, 60));
         title.setGravity(Gravity.CENTER);
@@ -42,11 +46,36 @@ public class VoiceAssistantActivity extends Activity {
         statusView.setTextSize(18f);
         statusView.setTextColor(Color.rgb(75, 75, 90));
         statusView.setGravity(Gravity.CENTER);
-        statusView.setPadding(0, 28, 0, 0);
+        statusView.setPadding(0, 28, 0, 24);
+
+        Button notificationSettings = new Button(this);
+        notificationSettings.setText("알림 소리 · 진동 설정");
+        notificationSettings.setOnClickListener(v -> openNotificationSettings());
 
         root.addView(title, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(statusView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(notificationSettings, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
+    }
+
+    private void openNotificationSettings() {
+        ReminderReceiver.ensureSoundChannel(this);
+        try {
+            Intent intent;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                intent = new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())
+                        .putExtra(Settings.EXTRA_CHANNEL_ID, ReminderReceiver.SOUND_CHANNEL_ID);
+            } else {
+                intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+            }
+            startActivity(intent);
+        } catch (Exception e) {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        }
     }
 
     public void setStatus(String text) {
