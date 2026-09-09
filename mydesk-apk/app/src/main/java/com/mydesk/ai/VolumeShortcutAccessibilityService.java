@@ -17,9 +17,8 @@ public class VolumeShortcutAccessibilityService extends AccessibilityService {
     private final Runnable holdRunnable = () -> {
         if (!volumeUpDown || triggered || !isScreenInteractive()) return;
         triggered = true;
-        Intent i = new Intent(this, MainActivity.class);
+        Intent i = new Intent(this, VoiceAssistantActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        i.putExtra(MainActivity.EXTRA_VOICE_ASSISTANT, true);
         startActivity(i);
     };
 
