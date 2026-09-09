@@ -25,13 +25,22 @@ public final class ReminderScheduler {
             for (int i = 0; i < a.length(); i++) {
                 JSONObject r = a.optJSONObject(i);
                 if (r == null) continue;
+                String id = r.optString("id", "task-" + i);
                 JSONObject d = r.optJSONObject("data");
                 if (d == null) continue;
+
+                boolean deleted = !r.optString("deletedAt", "").isEmpty();
+                boolean done = "done".equalsIgnoreCase(d.optString("status", ""));
+                if (deleted || done) {
+                    cancel(context, id);
+                    continue;
+                }
+
                 String dueAt = d.optString("dueAt", "");
                 if (dueAt.isEmpty()) continue;
                 long when = parseDueAt(dueAt);
                 if (when <= System.currentTimeMillis()) continue;
-                String id = r.optString("id", "task-" + i);
+
                 String title = d.optString("title", "MyDesk AI 할 일");
                 String repeatRule = d.optString("repeatRule", "");
                 schedule(context, id, title, when, repeatRule);
@@ -79,6 +88,18 @@ public final class ReminderScheduler {
             am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
         } else {
             am.setExact(AlarmManager.RTC_WAKEUP, when, pi);
+        }
+    }
+
+    public static void cancel(Context context, String id) {
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        Intent intent = new Intent(context, ReminderReceiver.class);
+        PendingIntent pi = PendingIntent.getBroadcast(context, id.hashCode(), intent,
+                PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE);
+        if (pi != null) {
+            am.cancel(pi);
+            pi.cancel();
         }
     }
 }
