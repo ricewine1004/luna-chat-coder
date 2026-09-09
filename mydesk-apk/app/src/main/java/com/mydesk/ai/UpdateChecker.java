@@ -5,8 +5,10 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 
 import org.json.JSONObject;
 
@@ -44,7 +46,7 @@ public final class UpdateChecker {
             c.disconnect();
             JSONObject j = new JSONObject(sb.toString());
             int versionCode = j.optInt("versionCode", 0);
-            if (versionCode <= BuildConfig.VERSION_CODE) return;
+            if (versionCode <= currentVersionCode(context)) return;
             String versionName = j.optString("versionName", "새 버전");
             String apkUrl = j.optString("apkUrl", "");
             String notes = j.optString("notes", "새 버전을 설치할 수 있습니다.");
@@ -63,5 +65,10 @@ public final class UpdateChecker {
             NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null) nm.notify(92001, b.build());
         } catch (Exception ignored) {}
+    }
+
+    private static long currentVersionCode(Context context) throws Exception {
+        PackageInfo p = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+        return Build.VERSION.SDK_INT >= 28 ? p.getLongVersionCode() : p.versionCode;
     }
 }
