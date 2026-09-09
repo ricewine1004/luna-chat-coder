@@ -30,16 +30,22 @@ public final class ReminderScheduler {
                 if (when <= System.currentTimeMillis()) continue;
                 String id = r.optString("id", "task-" + i);
                 String title = d.optString("title", "MyDesk AI 할 일");
-                schedule(context, id, title, when);
+                String repeatRule = d.optString("repeatRule", "");
+                schedule(context, id, title, when, repeatRule);
             }
         } catch (Exception ignored) {}
     }
 
     public static void schedule(Context context, String id, String title, long when) {
+        schedule(context, id, title, when, "");
+    }
+
+    public static void schedule(Context context, String id, String title, long when, String repeatRule) {
         int requestCode = id.hashCode();
         Intent intent = new Intent(context, ReminderReceiver.class);
         intent.putExtra("title", title);
         intent.putExtra("id", id);
+        intent.putExtra("repeatRule", repeatRule == null ? "" : repeatRule);
         PendingIntent pi = PendingIntent.getBroadcast(context, requestCode, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
