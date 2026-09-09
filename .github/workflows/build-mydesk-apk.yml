@@ -28,14 +28,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp app/build/outputs/apk/release/app-release-unsigned.apk MyDesk_AI_0.2.4_unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk MyDesk_AI_0.2.5_unsigned.apk
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -type f -path '*/lib/apksigner.jar' | sort -V | tail -n 1)
           test -n "$APKSIGNER_JAR"
           cp "$APKSIGNER_JAR" apksigner.jar
       - uses: actions/upload-artifact@v4
         with:
-          name: MyDesk_AI_0.2.4_UNSIGNED_AND_SIGNER
+          name: MyDesk_AI_0.2.5_UNSIGNED_AND_SIGNER
           path: |
-            mydesk-apk/MyDesk_AI_0.2.4_unsigned.apk
+            mydesk-apk/MyDesk_AI_0.2.5_unsigned.apk
             mydesk-apk/apksigner.jar
           if-no-files-found: error
