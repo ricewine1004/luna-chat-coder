@@ -76,7 +76,10 @@ public class ReminderSyncJobService extends JobService {
         String token = prefs.getString("token", "");
         if (token.isEmpty()) return;
 
-        String since = prefs.getString("server_sync_since", "1970-01-01T00:00:00.000Z");
+        boolean needVoiceCacheBootstrap = !prefs.contains("voice_task_cache");
+        String since = needVoiceCacheBootstrap
+                ? "1970-01-01T00:00:00.000Z"
+                : prefs.getString("server_sync_since", "1970-01-01T00:00:00.000Z");
         String encodedSince = URLEncoder.encode(since, StandardCharsets.UTF_8.name());
         URL url = new URL(MainActivity.APP_URL + "/api/sync?since=" + encodedSince);
         HttpURLConnection c = (HttpURLConnection) url.openConnection();
@@ -97,7 +100,10 @@ public class ReminderSyncJobService extends JobService {
 
         JSONObject root = new JSONObject(sb.toString());
         JSONArray records = root.optJSONArray("records");
-        if (records != null) ReminderScheduler.syncTasks(context, records.toString());
+        if (records != null) {
+            ReminderScheduler.syncTasks(context, records.toString());
+            LocalTaskStore.mergeRecords(context, records);
+        }
 
         String serverTime = root.optString("serverTime", "");
         if (!serverTime.isEmpty()) {
