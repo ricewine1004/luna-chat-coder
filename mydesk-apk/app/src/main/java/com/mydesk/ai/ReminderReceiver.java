@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ContentResolver;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -11,7 +12,6 @@ import android.graphics.Color;
 import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
-import android.provider.Settings;
 
 import java.time.DayOfWeek;
 import java.time.Instant;
@@ -19,8 +19,9 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
 public class ReminderReceiver extends BroadcastReceiver {
-    private static final String SOUND_CHANNEL_ID = "mydesk_reminders_sound_v2";
-    private static final String OLD_SOUND_CHANNEL_ID = "mydesk_reminders_sound_v1";
+    private static final String SOUND_CHANNEL_ID = "mydesk_signature_sound_v3";
+    private static final String OLD_SOUND_CHANNEL_ID_V2 = "mydesk_reminders_sound_v2";
+    private static final String OLD_SOUND_CHANNEL_ID_V1 = "mydesk_reminders_sound_v1";
 
     @Override public void onReceive(Context context, Intent intent) {
         ensureSoundChannel(context);
@@ -78,14 +79,11 @@ public class ReminderReceiver extends BroadcastReceiver {
         NotificationManager nm = context.getSystemService(NotificationManager.class);
         if (nm == null) return;
 
-        // Android notification channel sound/vibration settings are immutable after creation.
-        // v2 uses a fresh channel so users upgrading from a silent v1 channel get sound again.
-        if (nm.getNotificationChannel(OLD_SOUND_CHANNEL_ID) != null) {
-            nm.deleteNotificationChannel(OLD_SOUND_CHANNEL_ID);
-        }
+        if (nm.getNotificationChannel(OLD_SOUND_CHANNEL_ID_V1) != null) nm.deleteNotificationChannel(OLD_SOUND_CHANNEL_ID_V1);
+        if (nm.getNotificationChannel(OLD_SOUND_CHANNEL_ID_V2) != null) nm.deleteNotificationChannel(OLD_SOUND_CHANNEL_ID_V2);
         if (nm.getNotificationChannel(SOUND_CHANNEL_ID) != null) return;
 
-        Uri soundUri = Settings.System.DEFAULT_NOTIFICATION_URI;
+        Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + context.getPackageName() + "/" + R.raw.mydesk_signature_b);
         AudioAttributes attributes = new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -93,12 +91,12 @@ public class ReminderReceiver extends BroadcastReceiver {
 
         NotificationChannel channel = new NotificationChannel(
                 SOUND_CHANNEL_ID,
-                "MyDesk AI 소리·진동 알림",
+                "MyDesk AI 전용 알림음",
                 NotificationManager.IMPORTANCE_HIGH
         );
-        channel.setDescription("MyDesk AI 일정, 할 일, 미리 알림 - 소리와 진동 사용");
+        channel.setDescription("MyDesk AI 일정과 할 일 전용 브랜드 알림음");
         channel.enableVibration(true);
-        channel.setVibrationPattern(new long[]{0, 250, 120, 250, 120, 350});
+        channel.setVibrationPattern(new long[]{0, 220, 100, 220});
         channel.enableLights(true);
         channel.setLightColor(Color.rgb(108, 92, 231));
         channel.setSound(soundUri, attributes);
