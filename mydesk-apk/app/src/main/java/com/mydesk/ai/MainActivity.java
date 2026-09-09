@@ -3,6 +3,7 @@ package com.mydesk.ai;
 import android.Manifest;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
@@ -29,9 +30,11 @@ public class MainActivity extends android.app.Activity {
     public static final String APP_URL = "https://mydesk-ai.mydesk-ai.workers.dev";
     public static final String CHANNEL_ID = "mydesk_reminders";
     public static final String PREFS = "mydesk_native";
+    private static final String PREF_TOKEN = "token";
     private WebView webView;
     private String launchReminderId = "";
     private String launchReminderTitle = "";
+    private boolean nativeAuthRestoreAttempted = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,11 +58,12 @@ public class MainActivity extends android.app.Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.2.1");
+        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.2.4");
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new NativeBridge(), "MyDeskNative");
         webView.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView view, String url) {
+                restoreNativeAuthIfNeeded(view);
                 injectNativeBridge();
                 if (!launchReminderTitle.isEmpty()) {
                     Toast.makeText(MainActivity.this, "알림: " + launchReminderTitle, Toast.LENGTH_LONG).show();
@@ -67,6 +71,22 @@ public class MainActivity extends android.app.Activity {
             }
         });
         webView.loadUrl(APP_URL);
+    }
+
+    private void restoreNativeAuthIfNeeded(WebView view) {
+        if (nativeAuthRestoreAttempted) return;
+        nativeAuthRestoreAttempted = true;
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String token = prefs.getString(PREF_TOKEN, "");
+        if (token == null || token.isEmpty()) return;
+
+        final String quoted = org.json.JSONObject.quote(token);
+        String js = "(function(){try{" +
+                "var current=localStorage.getItem('mydesk_owner_code')||'';" +
+                "if(!current){localStorage.setItem('mydesk_owner_code'," + quoted + ");location.reload();return 'restored';}" +
+                "return 'already';" +
+                "}catch(e){return 'error';}})();";
+        view.evaluateJavascript(js, null);
     }
 
     @Override protected void onResume() {
@@ -125,7 +145,7 @@ public class MainActivity extends android.app.Activity {
                 "var t=localStorage.getItem('mydesk_owner_code')||'';if(t)MyDeskNative.saveToken(t);" +
                 "if(typeof state!=='undefined'&&state.records){var a=state.records.filter(function(r){return r&&r.kind==='task'&&r.data&&r.data.dueAt&&r.data.status!=='done'&&!r.deletedAt;});MyDeskNative.syncTasks(JSON.stringify(a));}" +
                 "}catch(e){}}" +
-                "setInterval(sendState,10000);setTimeout(sendState,1200);" +
+                "setInterval(sendState,60000);setTimeout(sendState,1200);" +
                 "var f=document.querySelector('#chatForm');if(f){f.addEventListener('submit',function(){try{var i=document.querySelector('#chatInput');if(i&&i.value)MyDeskNative.captureReminderRequest(i.value);}catch(e){}},true);}" +
                 "})();";
         webView.evaluateJavascript(js, null);
@@ -133,8 +153,16 @@ public class MainActivity extends android.app.Activity {
 
     public class NativeBridge {
         @JavascriptInterface public void saveToken(String token) {
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("token", token).apply();
-            ReminderSyncJobService.syncNow(MainActivity.this);
+            if (token == null || token.isEmpty()) return;
+            SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+            String old = prefs.getString(PREF_TOKEN, "");
+            if (!token.equals(old)) {
+                prefs.edit().putString(PREF_TOKEN, token).apply();
+                ReminderSyncJobService.syncNow(MainActivity.this);
+            }
+        }
+        @JavascriptInterface public void clearToken() {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(PREF_TOKEN).apply();
         }
         @JavascriptInterface public void syncTasks(String json) { ReminderScheduler.syncTasks(MainActivity.this, json); }
         @JavascriptInterface public void captureReminderRequest(String text) {
