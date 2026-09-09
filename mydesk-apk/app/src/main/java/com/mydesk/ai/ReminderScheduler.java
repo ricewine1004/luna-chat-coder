@@ -33,6 +33,7 @@ public final class ReminderScheduler {
                 boolean done = "done".equalsIgnoreCase(d.optString("status", ""));
                 if (deleted || done) {
                     cancel(context, id);
+                    cancelAlarmKey(context, id + "-pre");
                     continue;
                 }
 
@@ -43,6 +44,14 @@ public final class ReminderScheduler {
 
                 String title = d.optString("title", "MyDesk AI 할 일");
                 String repeatRule = d.optString("repeatRule", "");
+                int remindBeforeMinutes = Math.max(0, Math.min(10080, d.optInt("remindBeforeMinutes", 0)));
+
+                if (remindBeforeMinutes > 0) {
+                    long preWhen = when - remindBeforeMinutes * 60_000L;
+                    if (preWhen > System.currentTimeMillis()) {
+                        scheduleInternal(context, id + "-pre", id, "미리 알림 · " + title, preWhen, "");
+                    }
+                }
                 schedule(context, id, title, when, repeatRule);
             }
         } catch (Exception ignored) {}
@@ -73,10 +82,14 @@ public final class ReminderScheduler {
     }
 
     public static void schedule(Context context, String id, String title, long when, String repeatRule) {
-        int requestCode = id.hashCode();
+        scheduleInternal(context, id, id, title, when, repeatRule);
+    }
+
+    private static void scheduleInternal(Context context, String alarmKey, String taskId, String title, long when, String repeatRule) {
+        int requestCode = alarmKey.hashCode();
         Intent intent = new Intent(context, ReminderReceiver.class);
         intent.putExtra("title", title);
-        intent.putExtra("id", id);
+        intent.putExtra("id", taskId);
         intent.putExtra("repeatRule", repeatRule == null ? "" : repeatRule);
         PendingIntent pi = PendingIntent.getBroadcast(context, requestCode, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -92,10 +105,14 @@ public final class ReminderScheduler {
     }
 
     public static void cancel(Context context, String id) {
+        cancelAlarmKey(context, id);
+    }
+
+    private static void cancelAlarmKey(Context context, String alarmKey) {
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
         Intent intent = new Intent(context, ReminderReceiver.class);
-        PendingIntent pi = PendingIntent.getBroadcast(context, id.hashCode(), intent,
+        PendingIntent pi = PendingIntent.getBroadcast(context, alarmKey.hashCode(), intent,
                 PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE);
         if (pi != null) {
             am.cancel(pi);
