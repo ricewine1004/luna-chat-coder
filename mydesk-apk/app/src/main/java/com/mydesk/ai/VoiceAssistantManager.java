@@ -1,7 +1,6 @@
 package com.mydesk.ai;
 
 import android.Manifest;
-import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -29,13 +28,13 @@ import java.util.Locale;
 
 public class VoiceAssistantManager {
     private static final String ACK_ID = "wake_ack";
-    private final MainActivity activity;
+    private final VoiceAssistantActivity activity;
     private TextToSpeech tts;
     private SpeechRecognizer recognizer;
     private boolean ttsReady = false;
     private boolean startWhenReady = false;
 
-    public VoiceAssistantManager(MainActivity activity) {
+    public VoiceAssistantManager(VoiceAssistantActivity activity) {
         this.activity = activity;
         initTts();
     }
@@ -45,13 +44,17 @@ public class VoiceAssistantManager {
             if (status != TextToSpeech.SUCCESS) return;
             tts.setLanguage(Locale.KOREA);
             tts.setSpeechRate(0.88f);
-            tts.setPitch(1.02f);
+            tts.setPitch(1.0f);
             chooseBestKoreanVoice();
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override public void onStart(String utteranceId) {}
-                @Override public void onError(String utteranceId) {}
+                @Override public void onError(String utteranceId) { activity.runOnUiThread(activity::finish); }
                 @Override public void onDone(String utteranceId) {
-                    if (ACK_ID.equals(utteranceId)) activity.runOnUiThread(VoiceAssistantManager.this::startListening);
+                    if (ACK_ID.equals(utteranceId)) {
+                        activity.runOnUiThread(VoiceAssistantManager.this::startListening);
+                    } else {
+                        activity.runOnUiThread(() -> activity.finishAfterDelay(450));
+                    }
                 }
             });
             ttsReady = true;
@@ -75,7 +78,7 @@ public class VoiceAssistantManager {
 
     public void start() {
         if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            activity.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, MainActivity.REQ_RECORD_AUDIO);
+            activity.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, VoiceAssistantActivity.REQ_RECORD_AUDIO);
             return;
         }
         if (!ttsReady) {
@@ -83,6 +86,7 @@ public class VoiceAssistantManager {
             return;
         }
         startWhenReady = false;
+        activity.setStatus("말씀해 주세요");
         speak("네. 말씀하세요.", ACK_ID);
     }
 
@@ -102,11 +106,11 @@ public class VoiceAssistantManager {
             recognizer = SpeechRecognizer.createSpeechRecognizer(activity);
         }
         recognizer.setRecognitionListener(new RecognitionListener() {
-            @Override public void onReadyForSpeech(Bundle params) {}
-            @Override public void onBeginningOfSpeech() {}
+            @Override public void onReadyForSpeech(Bundle params) { activity.setStatus("듣고 있어요…"); }
+            @Override public void onBeginningOfSpeech() { activity.setStatus("듣고 있어요…"); }
             @Override public void onRmsChanged(float rmsdB) {}
             @Override public void onBufferReceived(byte[] buffer) {}
-            @Override public void onEndOfSpeech() {}
+            @Override public void onEndOfSpeech() { activity.setStatus("확인하고 있어요…"); }
             @Override public void onPartialResults(Bundle partialResults) {}
             @Override public void onEvent(int eventType, Bundle params) {}
 
@@ -122,6 +126,7 @@ public class VoiceAssistantManager {
             @Override public void onResults(Bundle results) {
                 ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 String text = list == null || list.isEmpty() ? "" : list.get(0).trim();
+                activity.setStatus(text.isEmpty() ? "잘 듣지 못했어요" : "“" + text + "”");
                 handleCommand(text);
                 destroyRecognizer();
             }
@@ -145,23 +150,14 @@ public class VoiceAssistantManager {
         String compact = text.replace(" ", "");
         if ((compact.contains("오늘") && (compact.contains("알림") || compact.contains("일정") || compact.contains("할일") || compact.contains("브리핑")))
                 || compact.contains("오늘뭐있어") || compact.contains("오늘뭐해야")) {
-            speak(buildTodayBriefing(), "today_briefing");
+            speak(buildBriefingForDate(LocalDate.now(ZoneId.of("Asia/Seoul")), "오늘"), "today_briefing");
             return;
         }
         if (compact.contains("내일") && (compact.contains("알림") || compact.contains("일정") || compact.contains("할일"))) {
-            speak(buildTomorrowBriefing(), "tomorrow_briefing");
+            speak(buildBriefingForDate(LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1), "내일"), "tomorrow_briefing");
             return;
         }
-        activity.submitVoiceTextToWeb(text);
-        speak("요청을 마이데스크에 전달했어요. 화면에서 확인해 주세요.", "web_handoff");
-    }
-
-    private String buildTodayBriefing() {
-        return buildBriefingForDate(LocalDate.now(ZoneId.of("Asia/Seoul")), "오늘");
-    }
-
-    private String buildTomorrowBriefing() {
-        return buildBriefingForDate(LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1), "내일");
+        speak("현재 음성 모드에서는 오늘이나 내일 일정 안내를 지원합니다.", "unsupported");
     }
 
     private String buildBriefingForDate(LocalDate targetDate, String label) {
@@ -174,14 +170,11 @@ public class VoiceAssistantManager {
             if (r == null) continue;
             JSONObject d = r.optJSONObject("data");
             if (d == null) continue;
-            String dueAt = d.optString("dueAt", "");
-            ZonedDateTime due = parseDueAt(dueAt);
+            ZonedDateTime due = parseDueAt(d.optString("dueAt", ""));
             if (due == null) continue;
             LocalDate date = due.toLocalDate();
             if (date.isBefore(today)) overdue++;
-            if (date.equals(targetDate)) {
-                sameDay.add(new Item(due, d.optString("title", "할 일"), d.optString("priority", "normal")));
-            }
+            if (date.equals(targetDate)) sameDay.add(new Item(due, d.optString("title", "할 일")));
         }
         sameDay.sort(Comparator.comparing(i -> i.when));
 
@@ -217,6 +210,7 @@ public class VoiceAssistantManager {
 
     private void speak(String text, String id) {
         if (tts == null || !ttsReady || text == null || text.isEmpty()) return;
+        activity.setStatus(text);
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id);
     }
 
@@ -240,11 +234,6 @@ public class VoiceAssistantManager {
     private static class Item {
         final ZonedDateTime when;
         final String title;
-        final String priority;
-        Item(ZonedDateTime when, String title, String priority) {
-            this.when = when;
-            this.title = title;
-            this.priority = priority;
-        }
+        Item(ZonedDateTime when, String title) { this.when = when; this.title = title; }
     }
 }
