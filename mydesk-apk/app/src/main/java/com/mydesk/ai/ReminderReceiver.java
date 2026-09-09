@@ -4,7 +4,6 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
-import android.content.ContentResolver;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -12,6 +11,7 @@ import android.graphics.Color;
 import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 
 import java.time.DayOfWeek;
 import java.time.Instant;
@@ -66,8 +66,7 @@ public class ReminderReceiver extends BroadcastReceiver {
                 .setColor(Color.rgb(108, 92, 231));
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + context.getPackageName() + "/" + R.raw.mydesk_notify);
-            b.setSound(soundUri);
+            b.setSound(Settings.System.DEFAULT_NOTIFICATION_URI);
             b.setVibrate(new long[]{0, 180, 90, 180});
         }
 
@@ -83,7 +82,7 @@ public class ReminderReceiver extends BroadcastReceiver {
         NotificationManager nm = context.getSystemService(NotificationManager.class);
         if (nm == null || nm.getNotificationChannel(SOUND_CHANNEL_ID) != null) return;
 
-        Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + context.getPackageName() + "/" + R.raw.mydesk_notify);
+        Uri soundUri = Settings.System.DEFAULT_NOTIFICATION_URI;
         AudioAttributes attributes = new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
