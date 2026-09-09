@@ -29,6 +29,20 @@ public class ReminderReceiver extends BroadcastReceiver {
         PendingIntent content = PendingIntent.getActivity(context, id.hashCode(), open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
+        Intent completeIntent = new Intent(context, ReminderActionReceiver.class);
+        completeIntent.setAction(ReminderActionReceiver.ACTION_COMPLETE);
+        completeIntent.putExtra("id", id);
+        completeIntent.putExtra("title", title);
+        PendingIntent complete = PendingIntent.getBroadcast(context, id.hashCode() ^ 0x3311, completeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        Intent snoozeIntent = new Intent(context, ReminderActionReceiver.class);
+        snoozeIntent.setAction(ReminderActionReceiver.ACTION_SNOOZE);
+        snoozeIntent.putExtra("id", id);
+        snoozeIntent.putExtra("title", title);
+        PendingIntent snooze = PendingIntent.getBroadcast(context, id.hashCode() ^ 0x7722, snoozeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
         Notification.Builder b = new Notification.Builder(context, MainActivity.CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("MyDesk AI")
@@ -36,6 +50,8 @@ public class ReminderReceiver extends BroadcastReceiver {
                 .setStyle(new Notification.BigTextStyle().bigText(title))
                 .setAutoCancel(true)
                 .setContentIntent(content)
+                .addAction(new Notification.Action.Builder(null, "완료", complete).build())
+                .addAction(new Notification.Action.Builder(null, "10분 미루기", snooze).build())
                 .setColor(Color.rgb(108, 92, 231));
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(id.hashCode(), b.build());
