@@ -6,4 +6,12 @@
         <item name="android:statusBarColor">#F8F8FC</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+
+    <style name="VoiceAssistantTheme" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#6C5CE7</item>
+        <item name="android:windowMinWidthMajor">88%</item>
+        <item name="android:windowMinWidthMinor">88%</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
 </resources>
