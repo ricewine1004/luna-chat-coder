@@ -44,6 +44,7 @@ public class MainActivity extends android.app.Activity {
         requestNotificationPermission();
         ReminderSyncJobService.schedule(this);
         ReminderSyncJobService.syncNow(this);
+        UpdateChecker.check(this);
 
         webView = new WebView(this);
         setContentView(webView);
@@ -54,7 +55,7 @@ public class MainActivity extends android.app.Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.1.1");
+        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.2.1");
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new NativeBridge(), "MyDeskNative");
         webView.setWebViewClient(new WebViewClient() {
@@ -66,6 +67,34 @@ public class MainActivity extends android.app.Activity {
             }
         });
         webView.loadUrl(APP_URL);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.onResume();
+            webView.resumeTimers();
+        }
+        ReminderSyncJobService.syncNow(this);
+        UpdateChecker.check(this);
+    }
+
+    @Override protected void onPause() {
+        if (webView != null) {
+            webView.onPause();
+            webView.pauseTimers();
+        }
+        super.onPause();
+    }
+
+    @Override protected void onDestroy() {
+        if (webView != null) {
+            webView.stopLoading();
+            webView.removeJavascriptInterface("MyDeskNative");
+            webView.destroy();
+            webView = null;
+        }
+        super.onDestroy();
     }
 
     @Override public void onBackPressed() {
