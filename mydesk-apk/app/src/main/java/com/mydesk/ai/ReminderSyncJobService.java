@@ -21,6 +21,7 @@ public class ReminderSyncJobService extends JobService {
     private static final int JOB_ID = 240901;
 
     public static void schedule(Context context) {
+        UpdateChecker.check(context);
         JobScheduler js = (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
         if (js == null) return;
         JobInfo job = new JobInfo.Builder(JOB_ID, new ComponentName(context, ReminderSyncJobService.class))
@@ -33,6 +34,7 @@ public class ReminderSyncJobService extends JobService {
 
     public static void syncNow(Context context) {
         Context app = context.getApplicationContext();
+        UpdateChecker.check(app);
         new Thread(() -> {
             try { syncContext(app); } catch (Exception ignored) {}
         }).start();
@@ -41,6 +43,7 @@ public class ReminderSyncJobService extends JobService {
     @Override public boolean onStartJob(JobParameters params) {
         new Thread(() -> {
             try { syncContext(this); } catch (Exception ignored) {}
+            UpdateChecker.check(this);
             jobFinished(params, false);
         }).start();
         return true;
