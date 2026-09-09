@@ -31,9 +31,16 @@ public class ReminderSyncJobService extends JobService {
         js.schedule(job);
     }
 
+    public static void syncNow(Context context) {
+        Context app = context.getApplicationContext();
+        new Thread(() -> {
+            try { syncContext(app); } catch (Exception ignored) {}
+        }).start();
+    }
+
     @Override public boolean onStartJob(JobParameters params) {
         new Thread(() -> {
-            try { sync(); } catch (Exception ignored) {}
+            try { syncContext(this); } catch (Exception ignored) {}
             jobFinished(params, false);
         }).start();
         return true;
@@ -41,8 +48,8 @@ public class ReminderSyncJobService extends JobService {
 
     @Override public boolean onStopJob(JobParameters params) { return true; }
 
-    private void sync() throws Exception {
-        SharedPreferences prefs = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
+    private static void syncContext(Context context) throws Exception {
+        SharedPreferences prefs = context.getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE);
         String token = prefs.getString("token", "");
         if (token.isEmpty()) return;
         URL url = new URL(MainActivity.APP_URL + "/api/sync?since=1970-01-01T00:00:00.000Z");
@@ -59,6 +66,6 @@ public class ReminderSyncJobService extends JobService {
         c.disconnect();
         JSONObject root = new JSONObject(sb.toString());
         JSONArray records = root.optJSONArray("records");
-        if (records != null) ReminderScheduler.syncTasks(this, records.toString());
+        if (records != null) ReminderScheduler.syncTasks(context, records.toString());
     }
 }
