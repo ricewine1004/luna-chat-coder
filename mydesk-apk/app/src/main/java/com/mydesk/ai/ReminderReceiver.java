@@ -1,12 +1,17 @@
 package com.mydesk.ai;
 
 import android.app.Notification;
+import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ContentResolver;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.media.AudioAttributes;
+import android.net.Uri;
+import android.os.Build;
 
 import java.time.DayOfWeek;
 import java.time.Instant;
@@ -14,7 +19,11 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
 public class ReminderReceiver extends BroadcastReceiver {
+    private static final String SOUND_CHANNEL_ID = "mydesk_reminders_sound_v1";
+
     @Override public void onReceive(Context context, Intent intent) {
+        ensureSoundChannel(context);
+
         String title = intent.getStringExtra("title");
         String id = intent.getStringExtra("id");
         String repeatRule = intent.getStringExtra("repeatRule");
@@ -43,8 +52,10 @@ public class ReminderReceiver extends BroadcastReceiver {
         PendingIntent snooze = PendingIntent.getBroadcast(context, id.hashCode() ^ 0x7722, snoozeIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-        Notification.Builder b = new Notification.Builder(context, MainActivity.CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+        Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(context, SOUND_CHANNEL_ID)
+                : new Notification.Builder(context);
+        b.setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("MyDesk AI")
                 .setContentText(title)
                 .setStyle(new Notification.BigTextStyle().bigText(title))
@@ -53,11 +64,42 @@ public class ReminderReceiver extends BroadcastReceiver {
                 .addAction(new Notification.Action.Builder(null, "완료", complete).build())
                 .addAction(new Notification.Action.Builder(null, "10분 미루기", snooze).build())
                 .setColor(Color.rgb(108, 92, 231));
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + context.getPackageName() + "/" + R.raw.mydesk_notify);
+            b.setSound(soundUri);
+            b.setVibrate(new long[]{0, 180, 90, 180});
+        }
+
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(id.hashCode(), b.build());
 
         long next = nextOccurrence(repeatRule);
         if (next > 0) ReminderScheduler.schedule(context, id, title, next, repeatRule);
+    }
+
+    private void ensureSoundChannel(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationManager nm = context.getSystemService(NotificationManager.class);
+        if (nm == null || nm.getNotificationChannel(SOUND_CHANNEL_ID) != null) return;
+
+        Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + context.getPackageName() + "/" + R.raw.mydesk_notify);
+        AudioAttributes attributes = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build();
+
+        NotificationChannel channel = new NotificationChannel(
+                SOUND_CHANNEL_ID,
+                "MyDesk AI 알림음",
+                NotificationManager.IMPORTANCE_HIGH
+        );
+        channel.setDescription("MyDesk AI 일정, 할 일, 미리 알림");
+        channel.enableVibration(true);
+        channel.setVibrationPattern(new long[]{0, 180, 90, 180});
+        channel.setLightColor(Color.rgb(108, 92, 231));
+        channel.setSound(soundUri, attributes);
+        nm.createNotificationChannel(channel);
     }
 
     private long nextOccurrence(String repeatRule) {
