@@ -4,6 +4,16 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="true"
@@ -13,14 +23,25 @@
         android:usesCleartextTraffic="false">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".LauncherActivity"
             android:exported="true"
-            android:screenOrientation="unspecified">
+            android:theme="@style/AppTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+
+        <activity
+            android:name=".VoiceAssistantActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/VoiceAssistantTheme" />
 
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver android:name=".ReminderActionReceiver" android:exported="false" />
@@ -35,5 +56,17 @@
             android:name=".ReminderSyncJobService"
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="false" />
+
+        <service
+            android:name=".VolumeShortcutAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/voice_shortcut_accessibility" />
+        </service>
     </application>
 </manifest>
