@@ -23,31 +23,21 @@
         android:usesCleartextTraffic="false">
 
         <activity
-            android:name=".LauncherActivity"
+            android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/AppTheme">
+            android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".MainActivity"
-            android:exported="false"
-            android:screenOrientation="unspecified" />
 
         <activity
             android:name=".VoiceAssistantActivity"
-            android:exported="true"
+            android:exported="false"
             android:excludeFromRecents="true"
             android:label="MyDesk AI 음성호출"
-            android:theme="@style/VoiceAssistantTheme">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:theme="@style/VoiceAssistantTheme" />
 
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver android:name=".ReminderActionReceiver" android:exported="false" />
