@@ -10,6 +10,11 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 
 public final class ReminderScheduler {
     private ReminderScheduler() {}
@@ -24,9 +29,7 @@ public final class ReminderScheduler {
                 if (d == null) continue;
                 String dueAt = d.optString("dueAt", "");
                 if (dueAt.isEmpty()) continue;
-                long when;
-                try { when = Instant.parse(dueAt).toEpochMilli(); }
-                catch (Exception ex) { continue; }
+                long when = parseDueAt(dueAt);
                 if (when <= System.currentTimeMillis()) continue;
                 String id = r.optString("id", "task-" + i);
                 String title = d.optString("title", "MyDesk AI 할 일");
@@ -34,6 +37,26 @@ public final class ReminderScheduler {
                 schedule(context, id, title, when, repeatRule);
             }
         } catch (Exception ignored) {}
+    }
+
+    private static long parseDueAt(String dueAt) {
+        if (dueAt == null || dueAt.trim().isEmpty()) return 0L;
+        String raw = dueAt.trim();
+        try { return Instant.parse(raw).toEpochMilli(); }
+        catch (Exception ignored) {}
+
+        ZoneId zone = ZoneId.of("Asia/Seoul");
+        try {
+            LocalDateTime dt = LocalDateTime.parse(raw, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            return dt.atZone(zone).toInstant().toEpochMilli();
+        } catch (Exception ignored) {}
+
+        try {
+            LocalDate date = LocalDate.parse(raw, DateTimeFormatter.ISO_LOCAL_DATE);
+            return ZonedDateTime.of(date.atTime(9, 0), zone).toInstant().toEpochMilli();
+        } catch (Exception ignored) {}
+
+        return 0L;
     }
 
     public static void schedule(Context context, String id, String title, long when) {
