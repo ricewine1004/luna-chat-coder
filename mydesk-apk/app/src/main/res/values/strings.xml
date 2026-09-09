@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">MyDesk AI</string>
+    <string name="voice_shortcut_accessibility_description">화면이 켜진 상태에서 볼륨 + 버튼을 1초 길게 눌러 MyDesk AI 음성 비서를 호출합니다.</string>
+</resources>
