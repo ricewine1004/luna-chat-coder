@@ -30,12 +30,10 @@ jobs:
           python3 - <<'PY'
           import math, wave, struct
           from pathlib import Path
-
           sr = 44100
           dur = 1.0
           n = int(sr * dur)
           buf = [0.0] * n
-
           def add_tone(freq, start, length, amp=0.2, decay=6.4, harmonic=0.16):
               i0 = int(start * sr)
               i1 = min(n, int((start + length) * sr))
@@ -46,13 +44,10 @@ jobs:
                   sig = math.sin(2 * math.pi * freq * t)
                   sig += harmonic * math.sin(2 * math.pi * freq * 2.01 * t)
                   buf[i] += amp * env * sig
-
-          # Selected candidate #2: MyDesk signature 3-note brand motif.
           add_tone(587.33, 0.00, 0.32, 0.18)
           add_tone(739.99, 0.20, 0.34, 0.20)
           add_tone(987.77, 0.43, 0.40, 0.24)
           add_tone(1975.53, 0.62, 0.20, 0.05, 10.5, 0.0)
-
           peak = max(abs(x) for x in buf) or 1.0
           scale = 0.84 / peak
           out = Path('app/src/main/res/raw/mydesk_signature_b.wav')
@@ -62,7 +57,6 @@ jobs:
               wf.setframerate(sr)
               frames = b''.join(struct.pack('<h', max(-32767, min(32767, int(x * scale * 32767)))) for x in buf)
               wf.writeframes(frames)
-          print(out)
           PY
       - name: Build unsigned release APK
         run: gradle :app:assembleRelease --no-daemon
@@ -70,14 +64,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp app/build/outputs/apk/release/app-release-unsigned.apk MyDesk_AI_0.2.7_unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk MyDesk_AI_0.2.8_unsigned.apk
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -type f -path '*/lib/apksigner.jar' | sort -V | tail -n 1)
           test -n "$APKSIGNER_JAR"
           cp "$APKSIGNER_JAR" apksigner.jar
       - uses: actions/upload-artifact@v4
         with:
-          name: MyDesk_AI_0.2.7_UNSIGNED_AND_SIGNER
+          name: MyDesk_AI_0.2.8_UNSIGNED_AND_SIGNER
           path: |
-            mydesk-apk/MyDesk_AI_0.2.7_unsigned.apk
+            mydesk-apk/MyDesk_AI_0.2.8_unsigned.apk
             mydesk-apk/apksigner.jar
           if-no-files-found: error
