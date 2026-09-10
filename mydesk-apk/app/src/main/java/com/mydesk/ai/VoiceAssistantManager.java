@@ -46,7 +46,12 @@ public class VoiceAssistantManager {
     private volatile boolean destroyed = false;
     private String lastSpoken = "";
     private String currentTaskId = "";
-    private String currentTaskTitle = "";
+
+    private SmsVoiceHelper.SmsRequest pendingSmsRequest;
+    private boolean awaitingSmsConfirmation = false;
+    private String pendingSmsDisplayName = "";
+    private String pendingSmsPhone = "";
+    private String pendingSmsMessage = "";
 
     public VoiceAssistantManager(VoiceAssistantActivity activity) {
         this.activity = activity;
@@ -71,12 +76,15 @@ public class VoiceAssistantManager {
             chooseBestKoreanVoice();
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override public void onStart(String utteranceId) {}
+
                 @Override public void onError(String utteranceId) {
                     activity.runOnUiThread(() -> activity.setStatus("음성 안내 중 오류가 발생했습니다."));
                 }
+
                 @Override public void onDone(String utteranceId) {
                     if (destroyed) return;
-                    if (ACK_ID.equals(utteranceId) || (utteranceId != null && utteranceId.startsWith(CONTINUE_PREFIX))) {
+                    if (ACK_ID.equals(utteranceId)
+                            || (utteranceId != null && utteranceId.startsWith(CONTINUE_PREFIX))) {
                         activity.runOnUiThread(VoiceAssistantManager.this::startListening);
                     }
                 }
@@ -120,6 +128,17 @@ public class VoiceAssistantManager {
             activity.setStatus("마이크 권한이 필요합니다.");
             speak("마이크 권한이 필요합니다.", "mic_denied", true);
         }
+    }
+
+    public void onSmsPermissionsResult(boolean granted) {
+        if (destroyed) return;
+        if (!granted) {
+            clearPendingSms();
+            speak("문자를 보내려면 연락처와 문자 권한이 필요합니다. 설정에서 권한을 허용해 주세요.",
+                    CONTINUE_PREFIX + "sms_permission_denied", true);
+            return;
+        }
+        resolvePendingSmsRequest();
     }
 
     private void startListening() {
@@ -177,11 +196,24 @@ public class VoiceAssistantManager {
             speak("잘 듣지 못했어요. 다시 말씀해 주세요.", CONTINUE_PREFIX + "empty", true);
             return;
         }
+
         String compact = text.replace(" ", "");
 
         if (compact.contains("종료") || compact.contains("그만") || compact.contains("끝내")) {
+            clearPendingSms();
             speak("네. 음성 비서를 종료할게요.", "goodbye", true);
             activity.finishAfterDelay(1400);
+            return;
+        }
+
+        if (awaitingSmsConfirmation) {
+            handleSmsConfirmation(text);
+            return;
+        }
+
+        SmsVoiceHelper.SmsRequest smsRequest = SmsVoiceHelper.parse(text);
+        if (smsRequest != null) {
+            beginSmsRequest(smsRequest);
             return;
         }
 
@@ -222,7 +254,8 @@ public class VoiceAssistantManager {
         if ((compact.contains("몇개") || compact.contains("몇건") || compact.contains("몇개남"))
                 && (compact.contains("일정") || compact.contains("할일") || compact.contains("남"))) {
             int count = LocalTaskStore.getPendingTasks(activity).length();
-            speak(count == 0 ? "남아 있는 할 일이 없습니다." : "현재 남아 있는 할 일은 " + count + "건입니다.", CONTINUE_PREFIX + "count", true);
+            speak(count == 0 ? "남아 있는 할 일이 없습니다." : "현재 남아 있는 할 일은 " + count + "건입니다.",
+                    CONTINUE_PREFIX + "count", true);
             return;
         }
 
@@ -238,7 +271,8 @@ public class VoiceAssistantManager {
             return;
         }
 
-        if ((compact.contains("10분") || compact.contains("십분")) && (compact.contains("미뤄") || compact.contains("뒤로") || compact.contains("나중"))) {
+        if ((compact.contains("10분") || compact.contains("십분"))
+                && (compact.contains("미뤄") || compact.contains("뒤로") || compact.contains("나중"))) {
             Item target = resolveCurrentOrNextTask();
             if (target == null) {
                 speak("미룰 일정이 없습니다.", CONTINUE_PREFIX + "snooze_none", true);
@@ -250,6 +284,113 @@ public class VoiceAssistantManager {
         }
 
         askServerAi(text);
+    }
+
+    private void beginSmsRequest(SmsVoiceHelper.SmsRequest request) {
+        pendingSmsRequest = request;
+        awaitingSmsConfirmation = false;
+        pendingSmsDisplayName = "";
+        pendingSmsPhone = "";
+        pendingSmsMessage = "";
+
+        if (!activity.hasSmsPermissions()) {
+            activity.setStatus("연락처 및 문자 권한을 허용해 주세요.");
+            activity.requestSmsPermissions();
+            return;
+        }
+        resolvePendingSmsRequest();
+    }
+
+    private void resolvePendingSmsRequest() {
+        if (pendingSmsRequest == null) {
+            speak("문자 요청을 다시 말씀해 주세요.", CONTINUE_PREFIX + "sms_missing", true);
+            return;
+        }
+
+        SmsVoiceHelper.ContactResult result = SmsVoiceHelper.findBestContact(activity, pendingSmsRequest.contactQuery);
+        if (result.status == SmsVoiceHelper.ContactResult.NOT_FOUND) {
+            String query = pendingSmsRequest.contactQuery;
+            clearPendingSms();
+            speak("연락처에서 " + query + "을 찾지 못했습니다. 저장된 이름을 조금 더 포함해서 다시 말씀해 주세요.",
+                    CONTINUE_PREFIX + "sms_not_found", true);
+            return;
+        }
+
+        if (result.status == SmsVoiceHelper.ContactResult.AMBIGUOUS) {
+            StringBuilder names = new StringBuilder();
+            for (int i = 0; i < result.ambiguousNames.size(); i++) {
+                if (i > 0) names.append(", ");
+                names.append(result.ambiguousNames.get(i));
+            }
+            clearPendingSms();
+            String tail = names.length() > 0 ? " 후보는 " + names + "입니다." : "";
+            speak("비슷한 연락처가 여러 명 있습니다." + tail + " 회사명이나 저장된 이름을 더 포함해서 다시 말씀해 주세요.",
+                    CONTINUE_PREFIX + "sms_ambiguous", true);
+            return;
+        }
+
+        pendingSmsDisplayName = result.displayName;
+        pendingSmsPhone = result.phoneNumber;
+        pendingSmsMessage = pendingSmsRequest.message;
+        pendingSmsRequest = null;
+        awaitingSmsConfirmation = true;
+
+        String messageForSpeech = pendingSmsMessage;
+        if (messageForSpeech.length() > 220) {
+            messageForSpeech = messageForSpeech.substring(0, 220) + ". 내용이 길어서 이후 부분은 생략했습니다";
+        }
+        speak(pendingSmsDisplayName + "에게 다음 내용으로 문자를 보낼까요? " + messageForSpeech
+                        + ". 보내 또는 취소라고 말씀해 주세요.",
+                CONTINUE_PREFIX + "sms_confirm", true);
+    }
+
+    private void handleSmsConfirmation(String text) {
+        String compact = text == null ? "" : text.replace(" ", "");
+        boolean negative = compact.contains("취소") || compact.contains("보내지마") || compact.contains("아니") || compact.contains("됐어");
+        if (negative) {
+            clearPendingSms();
+            speak("문자 전송을 취소했습니다.", CONTINUE_PREFIX + "sms_cancel", true);
+            return;
+        }
+
+        boolean positive = compact.contains("보내") || compact.contains("전송")
+                || compact.equals("응") || compact.equals("네") || compact.equals("그래") || compact.equals("좋아");
+        if (!positive) {
+            speak("문자를 보내려면 보내, 취소하려면 취소라고 말씀해 주세요.",
+                    CONTINUE_PREFIX + "sms_confirm_again", true);
+            return;
+        }
+
+        if (!activity.hasSmsPermissions()) {
+            activity.setStatus("연락처 및 문자 권한을 허용해 주세요.");
+            activity.requestSmsPermissions();
+            return;
+        }
+
+        String name = pendingSmsDisplayName;
+        String phone = pendingSmsPhone;
+        String message = pendingSmsMessage;
+        try {
+            SmsVoiceHelper.sendSms(activity, phone, message);
+            clearPendingSms();
+            speak(name + "에게 문자를 보냈습니다.", CONTINUE_PREFIX + "sms_sent", true);
+        } catch (SecurityException e) {
+            clearPendingSms();
+            speak("문자 권한이 없어 전송하지 못했습니다. 권한 설정을 확인해 주세요.",
+                    CONTINUE_PREFIX + "sms_security", true);
+        } catch (Exception e) {
+            clearPendingSms();
+            speak("문자를 보내지 못했습니다. 기본 문자 심 설정과 통신 상태를 확인해 주세요.",
+                    CONTINUE_PREFIX + "sms_failed", true);
+        }
+    }
+
+    private void clearPendingSms() {
+        pendingSmsRequest = null;
+        awaitingSmsConfirmation = false;
+        pendingSmsDisplayName = "";
+        pendingSmsPhone = "";
+        pendingSmsMessage = "";
     }
 
     private Item resolveCurrentOrNextTask() {
@@ -281,12 +422,10 @@ public class VoiceAssistantManager {
 
     private void setCurrentTask(Item item) {
         currentTaskId = item == null ? "" : item.id;
-        currentTaskTitle = item == null ? "" : item.title;
     }
 
     private void clearCurrentTask() {
         currentTaskId = "";
-        currentTaskTitle = "";
     }
 
     private Item findNextTask() {
@@ -420,7 +559,9 @@ public class VoiceAssistantManager {
         sameDay.sort(Comparator.comparing(i -> i.when));
 
         if (sameDay.isEmpty()) {
-            if ("오늘".equals(label) && overdue > 0) return "오늘 예정된 일정은 없습니다. 다만 미완료된 지난 일정이 " + overdue + "건 있습니다.";
+            if ("오늘".equals(label) && overdue > 0) {
+                return "오늘 예정된 일정은 없습니다. 다만 미완료된 지난 일정이 " + overdue + "건 있습니다.";
+            }
             return label + " 예정된 일정은 없습니다.";
         }
 
@@ -437,7 +578,7 @@ public class VoiceAssistantManager {
         sb.append("이 있습니다.");
         if (sameDay.size() > limit) sb.append(" 그 외에 ").append(sameDay.size() - limit).append("건이 더 있습니다.");
         if ("오늘".equals(label) && overdue > 0) sb.append(" 미완료된 지난 일정은 ").append(overdue).append("건입니다.");
-        if (!sameDay.isEmpty()) setCurrentTask(sameDay.get(0));
+        setCurrentTask(sameDay.get(0));
         return sb.toString();
     }
 
@@ -467,6 +608,7 @@ public class VoiceAssistantManager {
 
     public void destroy() {
         destroyed = true;
+        clearPendingSms();
         destroyRecognizer();
         if (tts != null) {
             try { tts.stop(); } catch (Exception ignored) {}
@@ -479,6 +621,7 @@ public class VoiceAssistantManager {
         final String id;
         final ZonedDateTime when;
         final String title;
+
         Item(String id, ZonedDateTime when, String title) {
             this.id = id;
             this.when = when;
