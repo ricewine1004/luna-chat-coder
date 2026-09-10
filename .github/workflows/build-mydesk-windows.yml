@@ -43,7 +43,6 @@ jobs:
           $dark = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(90,97,112))
           $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(60,63,73))
           $pink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255,139,156))
-          $white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
           $darkPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(90,97,112)), 16
           $darkPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
           $darkPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
@@ -51,7 +50,6 @@ jobs:
 
           $g.FillEllipse($teal, 50, 50, 156, 168)
           $g.DrawArc($darkPen, 47, 30, 162, 135, 195, 150)
-          $g.FillRoundedRectangle = $null
           $g.FillEllipse($dark, 29, 101, 40, 70)
           $g.FillEllipse($dark, 187, 101, 40, 70)
           $g.FillEllipse($ink, 91, 119, 15, 18)
@@ -72,7 +70,7 @@ jobs:
           $stream.Dispose()
           $icon.Dispose()
           [NativeIcon]::DestroyIcon($hIcon) | Out-Null
-          $g.Dispose(); $bmp.Dispose(); $teal.Dispose(); $dark.Dispose(); $ink.Dispose(); $pink.Dispose(); $white.Dispose(); $darkPen.Dispose(); $smilePen.Dispose()
+          $g.Dispose(); $bmp.Dispose(); $teal.Dispose(); $dark.Dispose(); $ink.Dispose(); $pink.Dispose(); $darkPen.Dispose(); $smilePen.Dispose()
 
       - name: Restore Windows client
         run: dotnet restore mydesk-windows/MyDeskAI.Windows.csproj
@@ -102,6 +100,7 @@ jobs:
           $iscc = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $iscc) { throw 'Inno Setup ISCC.exe not found' }
           & $iscc 'mydesk-windows\installer\MyDeskAI.iss'
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
       - name: Verify installer output
         shell: pwsh
