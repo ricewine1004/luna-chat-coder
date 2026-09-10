@@ -105,13 +105,13 @@ jobs:
       - name: Verify installer output
         shell: pwsh
         run: |
-          $installer = 'mydesk-windows\dist\MyDesk_AI_PC_Setup_0.3.7.exe'
+          $installer = 'mydesk-windows\dist\MyDesk_AI_PC_Setup_0.3.8.exe'
           if (-not (Test-Path $installer)) { throw 'Installer was not created' }
           Get-FileHash $installer -Algorithm SHA256 | Format-List
           Get-Item $installer | Format-List Name,Length,LastWriteTime
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MyDesk_AI_PC_Setup_0.3.7
-          path: mydesk-windows/dist/MyDesk_AI_PC_Setup_0.3.7.exe
+          name: MyDesk_AI_PC_Setup_0.3.8
+          path: mydesk-windows/dist/MyDesk_AI_PC_Setup_0.3.8.exe
           if-no-files-found: error
