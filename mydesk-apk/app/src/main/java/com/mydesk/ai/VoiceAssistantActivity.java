@@ -18,6 +18,7 @@ import android.widget.TextView;
 
 public class VoiceAssistantActivity extends Activity {
     public static final int REQ_RECORD_AUDIO = 2201;
+    public static final int REQ_SMS_PERMISSIONS = 2202;
     private VoiceAssistantManager manager;
     private TextView statusView;
 
@@ -78,6 +79,15 @@ public class VoiceAssistantActivity extends Activity {
         }
     }
 
+    public boolean hasSmsPermissions() {
+        return checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public void requestSmsPermissions() {
+        requestPermissions(new String[]{Manifest.permission.READ_CONTACTS, Manifest.permission.SEND_SMS}, REQ_SMS_PERMISSIONS);
+    }
+
     public void setStatus(String text) {
         runOnUiThread(() -> {
             if (statusView != null) statusView.setText(text == null ? "" : text);
@@ -90,9 +100,13 @@ public class VoiceAssistantActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_RECORD_AUDIO && manager != null) {
+        if (manager == null) return;
+
+        if (requestCode == REQ_RECORD_AUDIO) {
             boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
             manager.onMicrophonePermissionResult(granted);
+        } else if (requestCode == REQ_SMS_PERMISSIONS) {
+            manager.onSmsPermissionsResult(hasSmsPermissions());
         }
     }
 
