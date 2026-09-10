@@ -6,7 +6,7 @@ namespace MyDeskAI.Windows;
 
 public sealed class MainForm : Form
 {
-    private const string AppVersion = "0.3.8";
+    private const string AppVersion = "0.3.9";
     private const string AppBaseUrl = "https://mydesk-ai.mydesk-ai.workers.dev";
     private const string AppHost = "mydesk-ai.mydesk-ai.workers.dev";
     private readonly WebView2 webView = new();
@@ -38,6 +38,38 @@ public sealed class MainForm : Form
     protected override async void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
+
+        Text = "MyDesk AI - 공통 업데이트 확인 중...";
+        UseWaitCursor = true;
+        CommonDeployResult deployResult;
+        try
+        {
+            deployResult = await CommonUpdateDeployer.TryDeployAsync();
+        }
+        catch (Exception ex)
+        {
+            deployResult = new CommonDeployResult(
+                true,
+                false,
+                "공통 업데이트 확인 중 오류가 발생했습니다. PC 앱은 계속 실행합니다.\n" + ex.Message,
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MyDesk AI", $"common-deploy-{AppVersion}.log"));
+        }
+        finally
+        {
+            UseWaitCursor = false;
+            Text = "MyDesk AI";
+        }
+
+        if (deployResult.Attempted && !deployResult.Success)
+        {
+            MessageBox.Show(
+                deployResult.Message + "\n\nPC 앱은 정상적으로 실행됩니다.\n로그: " + deployResult.LogPath,
+                "MyDesk AI 공통 업데이트",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+
         await InitializeBrowserAsync();
     }
 
@@ -103,7 +135,7 @@ public sealed class MainForm : Form
                 try { await webView.EnsureCoreWebView2Async(); webView.Reload(); } catch { }
             }));
 
-            webView.Source = new Uri($"{AppBaseUrl}/?client=windows&v={AppVersion}");
+            webView.Source = new Uri($"{AppBaseUrl}/?client=windows&v={AppVersion}&cb={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}");
         }
         catch (WebView2RuntimeNotFoundException)
         {
