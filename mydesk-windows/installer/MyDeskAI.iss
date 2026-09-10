@@ -1,5 +1,5 @@
 #define MyAppName "MyDesk AI"
-#define MyAppVersion "0.3.7"
+#define MyAppVersion "0.3.8"
 #define MyAppPublisher "MyDesk AI"
 #define MyAppExeName "MyDeskAI.exe"
 
@@ -13,7 +13,7 @@ DefaultGroupName=MyDesk AI
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=MyDesk_AI_PC_Setup_0.3.7
+OutputBaseFilename=MyDesk_AI_PC_Setup_0.3.8
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -24,7 +24,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 RestartApplications=no
 UsePreviousAppDir=yes
-VersionInfoVersion=0.3.7.0
+VersionInfoVersion=0.3.8.0
 VersionInfoProductName=MyDesk AI
 VersionInfoDescription=MyDesk AI Windows Installer
 
