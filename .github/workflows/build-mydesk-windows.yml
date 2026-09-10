@@ -1,0 +1,118 @@
+name: Build MyDesk AI Windows Installer
+
+on:
+  push:
+    branches: [ "mydesk-ai-apk-build" ]
+    paths:
+      - 'mydesk-windows/**'
+      - '.github/workflows/build-mydesk-windows.yml'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Generate MyDesk AI Windows icon
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeIcon {
+              [DllImport("user32.dll", CharSet = CharSet.Auto)]
+              public static extern bool DestroyIcon(IntPtr handle);
+          }
+          "@
+
+          $assetDir = Join-Path $PWD 'mydesk-windows\Assets'
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+          $bmp = New-Object System.Drawing.Bitmap 256,256
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $g.Clear([System.Drawing.Color]::FromArgb(243,240,255))
+
+          $teal = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(143,230,222))
+          $dark = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(90,97,112))
+          $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(60,63,73))
+          $pink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255,139,156))
+          $white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+          $darkPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(90,97,112)), 16
+          $darkPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+          $darkPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+          $smilePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 8
+
+          $g.FillEllipse($teal, 50, 50, 156, 168)
+          $g.DrawArc($darkPen, 47, 30, 162, 135, 195, 150)
+          $g.FillRoundedRectangle = $null
+          $g.FillEllipse($dark, 29, 101, 40, 70)
+          $g.FillEllipse($dark, 187, 101, 40, 70)
+          $g.FillEllipse($ink, 91, 119, 15, 18)
+          $g.FillEllipse($ink, 150, 119, 15, 18)
+          $g.FillEllipse($pink, 72, 148, 30, 16)
+          $g.FillEllipse($pink, 154, 148, 30, 16)
+          $g.DrawArc($smilePen, 106, 137, 45, 40, 20, 140)
+          $g.DrawLine($darkPen, 195, 161, 232, 170)
+          $g.FillEllipse($dark, 226, 164, 15, 15)
+
+          $pngPath = Join-Path $assetDir 'mydesk.png'
+          $icoPath = Join-Path $assetDir 'mydesk.ico'
+          $bmp.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
+          $hIcon = $bmp.GetHicon()
+          $icon = [System.Drawing.Icon]::FromHandle($hIcon)
+          $stream = [System.IO.File]::Create($icoPath)
+          $icon.Save($stream)
+          $stream.Dispose()
+          $icon.Dispose()
+          [NativeIcon]::DestroyIcon($hIcon) | Out-Null
+          $g.Dispose(); $bmp.Dispose(); $teal.Dispose(); $dark.Dispose(); $ink.Dispose(); $pink.Dispose(); $white.Dispose(); $darkPen.Dispose(); $smilePen.Dispose()
+
+      - name: Restore Windows client
+        run: dotnet restore mydesk-windows/MyDeskAI.Windows.csproj
+
+      - name: Publish Windows client
+        run: dotnet publish mydesk-windows/MyDeskAI.Windows.csproj -c Release -r win-x64 --self-contained true -o mydesk-windows/publish --no-restore
+
+      - name: Install Inno Setup if needed
+        shell: pwsh
+        run: |
+          $paths = @(
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          )
+          $found = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $found) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build installer EXE
+        shell: pwsh
+        run: |
+          $paths = @(
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          )
+          $iscc = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'Inno Setup ISCC.exe not found' }
+          & $iscc 'mydesk-windows\installer\MyDeskAI.iss'
+
+      - name: Verify installer output
+        shell: pwsh
+        run: |
+          $installer = 'mydesk-windows\dist\MyDesk_AI_PC_Setup_0.3.3.exe'
+          if (-not (Test-Path $installer)) { throw 'Installer was not created' }
+          Get-FileHash $installer -Algorithm SHA256 | Format-List
+          Get-Item $installer | Format-List Name,Length,LastWriteTime
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyDesk_AI_PC_Setup_0.3.3
+          path: mydesk-windows/dist/MyDesk_AI_PC_Setup_0.3.3.exe
+          if-no-files-found: error
