@@ -1,5 +1,5 @@
 #define MyAppName "MyDesk AI"
-#define MyAppVersion "0.3.8"
+#define MyAppVersion "0.3.9"
 #define MyAppPublisher "MyDesk AI"
 #define MyAppExeName "MyDeskAI.exe"
 
@@ -13,7 +13,7 @@ DefaultGroupName=MyDesk AI
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=MyDesk_AI_PC_Setup_0.3.8
+OutputBaseFilename=MyDesk_AI_PC_AutoUpdate_0.3.9
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -24,9 +24,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 RestartApplications=no
 UsePreviousAppDir=yes
-VersionInfoVersion=0.3.8.0
+VersionInfoVersion=0.3.9.0
 VersionInfoProductName=MyDesk AI
-VersionInfoDescription=MyDesk AI Windows Installer
+VersionInfoDescription=MyDesk AI Windows + Cloudflare Common Auto Updater
 
 [Files]
 Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -36,4 +36,4 @@ Name: "{autoprograms}\MyDesk AI"; Filename: "{app}\{#MyAppExeName}"; WorkingDir:
 Name: "{autodesktop}\MyDesk AI"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "MyDesk AI 실행"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "MyDesk AI 실행 및 공통 업데이트 확인"; Flags: nowait postinstall skipifsilent
