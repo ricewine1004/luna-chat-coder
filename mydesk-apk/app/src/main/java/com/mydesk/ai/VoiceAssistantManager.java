@@ -331,8 +331,69 @@ public class VoiceAssistantManager {
 
         pendingSmsDisplayName = result.displayName;
         pendingSmsPhone = result.phoneNumber;
-        pendingSmsMessage = pendingSmsRequest.message;
+        String rawMessage = pendingSmsRequest.message;
         pendingSmsRequest = null;
+
+        if (SmsVoiceHelper.needsAiPolish(rawMessage)) {
+            polishSmsAndConfirm(rawMessage);
+        } else {
+            confirmSmsMessage(rawMessage);
+        }
+    }
+
+    private void polishSmsAndConfirm(String rawMessage) {
+        activity.setStatus("문자 내용을 자연스럽게 다듬고 있어요…");
+        new Thread(() -> {
+            String polished = SmsVoiceHelper.fallbackPolish(rawMessage);
+            try {
+                SharedPreferences prefs = activity.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE);
+                String token = prefs.getString("token", "");
+                if (token != null && !token.isEmpty()) {
+                    HttpURLConnection c = (HttpURLConnection) new URL(MainActivity.APP_URL + "/api/sms/rewrite").openConnection();
+                    c.setRequestMethod("POST");
+                    c.setConnectTimeout(8000);
+                    c.setReadTimeout(12000);
+                    c.setDoOutput(true);
+                    c.setRequestProperty("Authorization", "Bearer " + token);
+                    c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+
+                    JSONObject body = new JSONObject();
+                    body.put("message", rawMessage);
+                    try (OutputStream os = c.getOutputStream()) {
+                        os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                    }
+
+                    int status = c.getResponseCode();
+                    if (status >= 200 && status < 300) {
+                        StringBuilder sb = new StringBuilder();
+                        try (BufferedReader br = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
+                            String line;
+                            while ((line = br.readLine()) != null) sb.append(line);
+                        }
+                        JSONObject root = new JSONObject(sb.toString());
+                        String aiText = root.optString("message", "").trim();
+                        if (!aiText.isEmpty() && aiText.length() <= 500) polished = aiText;
+                    }
+                    c.disconnect();
+                }
+            } catch (Exception ignored) {
+                // 서버 AI를 사용할 수 없으면 안전한 로컬 문구를 그대로 사용합니다.
+            }
+
+            final String finalMessage = polished == null || polished.trim().isEmpty() ? rawMessage : polished.trim();
+            activity.runOnUiThread(() -> {
+                if (!destroyed) confirmSmsMessage(finalMessage);
+            });
+        }).start();
+    }
+
+    private void confirmSmsMessage(String message) {
+        pendingSmsMessage = message == null ? "" : message.trim();
+        if (pendingSmsMessage.isEmpty()) {
+            clearPendingSms();
+            speak("문자 내용을 확인하지 못했습니다. 다시 말씀해 주세요.", CONTINUE_PREFIX + "sms_empty", true);
+            return;
+        }
         awaitingSmsConfirmation = true;
 
         String messageForSpeech = pendingSmsMessage;
