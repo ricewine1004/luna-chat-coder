@@ -27,7 +27,11 @@ public final class ReminderScheduler {
                 if (r == null) continue;
                 String id = r.optString("id", "task-" + i);
                 JSONObject d = r.optJSONObject("data");
-                if (d == null) continue;
+                if (d == null) {
+                    cancel(context, id);
+                    cancelAlarmKey(context, id + "-pre");
+                    continue;
+                }
 
                 boolean deleted = !r.optString("deletedAt", "").isEmpty();
                 boolean done = "done".equalsIgnoreCase(d.optString("status", ""));
@@ -38,9 +42,18 @@ public final class ReminderScheduler {
                 }
 
                 String dueAt = d.optString("dueAt", "");
-                if (dueAt.isEmpty()) continue;
+                if (dueAt.isEmpty()) {
+                    cancel(context, id);
+                    cancelAlarmKey(context, id + "-pre");
+                    continue;
+                }
+
                 long when = parseDueAt(dueAt);
-                if (when <= System.currentTimeMillis()) continue;
+                if (when <= System.currentTimeMillis()) {
+                    cancel(context, id);
+                    cancelAlarmKey(context, id + "-pre");
+                    continue;
+                }
 
                 String title = d.optString("title", "MyDesk AI 할 일");
                 String repeatRule = d.optString("repeatRule", "");
@@ -50,8 +63,14 @@ public final class ReminderScheduler {
                     long preWhen = when - remindBeforeMinutes * 60_000L;
                     if (preWhen > System.currentTimeMillis()) {
                         scheduleInternal(context, id + "-pre", id, "미리 알림 · " + title, preWhen, "");
+                    } else {
+                        cancelAlarmKey(context, id + "-pre");
                     }
+                } else {
+                    // 예전에 미리 알림이 설정되어 있다가 해제된 경우 남아 있는 예약을 정리합니다.
+                    cancelAlarmKey(context, id + "-pre");
                 }
+
                 schedule(context, id, title, when, repeatRule);
             }
         } catch (Exception ignored) {}
