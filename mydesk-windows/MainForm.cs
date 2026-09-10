@@ -6,7 +6,8 @@ namespace MyDeskAI.Windows;
 
 public sealed class MainForm : Form
 {
-    private const string AppUrl = "https://mydesk-ai.mydesk-ai.workers.dev";
+    private const string AppVersion = "0.3.8";
+    private const string AppBaseUrl = "https://mydesk-ai.mydesk-ai.workers.dev";
     private const string AppHost = "mydesk-ai.mydesk-ai.workers.dev";
     private readonly WebView2 webView = new();
 
@@ -54,7 +55,7 @@ public sealed class MainForm : Form
 
             var core = webView.CoreWebView2;
             var settings = core.Settings;
-            settings.UserAgent = settings.UserAgent + " MyDeskAI-Windows/0.3.3";
+            settings.UserAgent = settings.UserAgent + " MyDeskAI-Windows/" + AppVersion;
             settings.IsStatusBarEnabled = false;
             settings.AreDefaultScriptDialogsEnabled = true;
             settings.AreDefaultContextMenusEnabled = true;
@@ -83,12 +84,26 @@ public sealed class MainForm : Form
                 }
             };
 
+            core.NavigationCompleted += async (_, args) =>
+            {
+                if (!args.IsSuccess) return;
+                try
+                {
+                    await core.ExecuteScriptAsync(
+                        "(function(){try{if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){try{r.update();}catch(e){}});});}}catch(e){}})();");
+                }
+                catch
+                {
+                    // The versioned URL already bypasses stale shell entries.
+                }
+            };
+
             core.ProcessFailed += (_, _) => BeginInvoke(new Action(async () =>
             {
                 try { await webView.EnsureCoreWebView2Async(); webView.Reload(); } catch { }
             }));
 
-            webView.Source = new Uri(AppUrl);
+            webView.Source = new Uri($"{AppBaseUrl}/?client=windows&v={AppVersion}");
         }
         catch (WebView2RuntimeNotFoundException)
         {
