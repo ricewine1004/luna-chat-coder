@@ -75,8 +75,8 @@ public final class SmsVoiceHelper {
         if (contact.isEmpty() || message.isEmpty()) return null;
 
         contact = stripOuterQuotes(contact);
-        message = stripOuterQuotes(message);
         message = stripQuoteParticle(message);
+        message = stripOuterQuotes(message);
         if (contact.isEmpty() || message.isEmpty()) return null;
 
         return new SmsRequest(contact, message);
@@ -116,9 +116,53 @@ public final class SmsVoiceHelper {
 
     private static String stripQuoteParticle(String message) {
         String out = message == null ? "" : message.trim();
-        if (out.endsWith("이라고")) out = out.substring(0, out.length() - 3).trim();
-        else if (out.endsWith("라고")) out = out.substring(0, out.length() - 2).trim();
-        return stripOuterQuotes(out);
+        String base = null;
+        if (out.endsWith("이라고")) base = out.substring(0, out.length() - 3).trim();
+        else if (out.endsWith("라고")) base = out.substring(0, out.length() - 2).trim();
+
+        // 따옴표로 실제 본문을 지정한 경우에만 뒤의 '라고/이라고'를 제거합니다.
+        // '회의실로 오라고'처럼 본문 자체가 -라고로 끝나는 문장은 훼손하지 않습니다.
+        if (base != null && endsWithClosingQuote(base)) out = base;
+        return out;
+    }
+
+    private static boolean endsWithClosingQuote(String value) {
+        if (value == null || value.isEmpty()) return false;
+        char last = value.charAt(value.length() - 1);
+        return last == '"' || last == '\'' || last == '”' || last == '’';
+    }
+
+    public static boolean needsAiPolish(String message) {
+        String value = message == null ? "" : message.trim();
+        if (value.isEmpty()) return false;
+        return value.matches("(?s).*(?:는다고|ㄴ다고|다고|라고|이라고|한다고|달라고|자고|냐고)[.!?…]*$");
+    }
+
+    public static String fallbackPolish(String message) {
+        String value = message == null ? "" : message.trim();
+        if (value.isEmpty()) return value;
+
+        String[][] common = {
+                {"늦는다고", "늦어"},
+                {"늦었다고", "늦었어"},
+                {"도착한다고", "도착할게"},
+                {"출발한다고", "출발할게"},
+                {"연락한다고", "연락할게"},
+                {"확인한다고", "확인할게"},
+                {"보낸다고", "보낼게"},
+                {"간다고", "갈게"},
+                {"온다고", "올게"},
+                {"끝났다고", "끝났어"},
+                {"괜찮다고", "괜찮아"},
+                {"고맙다고", "고마워"},
+                {"미안하다고", "미안해"}
+        };
+        for (String[] pair : common) {
+            if (value.endsWith(pair[0])) {
+                return value.substring(0, value.length() - pair[0].length()) + pair[1] + ".";
+            }
+        }
+        return value;
     }
 
     public static ContactResult findBestContact(Context context, String query) {
