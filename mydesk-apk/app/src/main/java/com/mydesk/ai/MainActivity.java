@@ -31,6 +31,8 @@ public class MainActivity extends android.app.Activity {
     public static final String CHANNEL_ID = "mydesk_reminders";
     public static final String PREFS = "mydesk_native";
     private static final String PREF_TOKEN = "token";
+    private static final String WEB_SHELL_VERSION = "0.3.8";
+    private static final String PREF_WEB_SHELL_VERSION = "web_shell_version";
     private WebView webView;
     private String launchReminderId = "";
     private String launchReminderTitle = "";
@@ -59,19 +61,36 @@ public class MainActivity extends android.app.Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.2.6");
+        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.3.8");
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new NativeBridge(), "MyDeskNative");
         webView.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView view, String url) {
                 restoreNativeAuthIfNeeded(view);
+                requestServiceWorkerUpdate(view);
                 injectNativeBridge();
                 if (!launchReminderTitle.isEmpty()) {
                     Toast.makeText(MainActivity.this, "알림: " + launchReminderTitle, Toast.LENGTH_LONG).show();
                 }
             }
         });
-        webView.loadUrl(APP_URL);
+
+        SharedPreferences nativePrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String previousShellVersion = nativePrefs.getString(PREF_WEB_SHELL_VERSION, "");
+        if (!WEB_SHELL_VERSION.equals(previousShellVersion)) {
+            webView.clearCache(true);
+            nativePrefs.edit().putString(PREF_WEB_SHELL_VERSION, WEB_SHELL_VERSION).apply();
+        }
+        webView.loadUrl(APP_URL + "/?client=android&v=" + WEB_SHELL_VERSION);
+    }
+
+    private void requestServiceWorkerUpdate(WebView view) {
+        String js = "(function(){try{" +
+                "if('serviceWorker' in navigator){" +
+                "navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){try{r.update();}catch(e){}});});" +
+                "}" +
+                "}catch(e){}})();";
+        view.evaluateJavascript(js, null);
     }
 
     private void restoreNativeAuthIfNeeded(WebView view) {
@@ -144,7 +163,7 @@ public class MainActivity extends android.app.Activity {
                 "if(window.__mydeskNativeInstalled)return;window.__mydeskNativeInstalled=true;" +
                 "function sendState(){try{" +
                 "var t=localStorage.getItem('mydesk_owner_code')||'';if(t)MyDeskNative.saveToken(t);" +
-                "if(typeof state!=='undefined'&&state.records){var a=state.records.filter(function(r){return r&&r.kind==='task'&&r.data&&r.data.dueAt&&r.data.status!=='done'&&!r.deletedAt;});MyDeskNative.syncTasks(JSON.stringify(a));}" +
+                "if(typeof state!=='undefined'&&state.records){var a=state.records.filter(function(r){return r&&r.kind==='task'&&r.data;});MyDeskNative.syncTasks(JSON.stringify(a));}" +
                 "}catch(e){}}" +
                 "setInterval(sendState,60000);setTimeout(sendState,1200);" +
                 "var f=document.querySelector('#chatForm');if(f){f.addEventListener('submit',function(){try{var i=document.querySelector('#chatInput');if(i&&i.value)MyDeskNative.captureReminderRequest(i.value);}catch(e){}},true);}" +
