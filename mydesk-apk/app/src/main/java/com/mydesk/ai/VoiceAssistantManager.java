@@ -1,8 +1,9 @@
 package com.mydesk.ai;
 
 import android.Manifest;
-import android.content.SharedPreferences;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.os.Build;
@@ -18,8 +19,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.OutputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -43,6 +44,9 @@ public class VoiceAssistantManager {
     private boolean ttsReady = false;
     private boolean startWhenReady = false;
     private volatile boolean destroyed = false;
+    private String lastSpoken = "";
+    private String currentTaskId = "";
+    private String currentTaskTitle = "";
 
     public VoiceAssistantManager(VoiceAssistantActivity activity) {
         this.activity = activity;
@@ -107,21 +111,21 @@ public class VoiceAssistantManager {
         }
         startWhenReady = false;
         activity.setStatus("말씀해 주세요");
-        speak("네. 말씀하세요.", ACK_ID);
+        speak("네. 말씀하세요.", ACK_ID, false);
     }
 
     public void onMicrophonePermissionResult(boolean granted) {
         if (granted) start();
         else {
             activity.setStatus("마이크 권한이 필요합니다.");
-            speak("마이크 권한이 필요합니다.", "mic_denied");
+            speak("마이크 권한이 필요합니다.", "mic_denied", true);
         }
     }
 
     private void startListening() {
         if (destroyed) return;
         if (!SpeechRecognizer.isRecognitionAvailable(activity)) {
-            speak("음성 인식 기능을 사용할 수 없습니다.", "recognizer_missing");
+            speak("음성 인식 기능을 사용할 수 없습니다.", "recognizer_missing", true);
             return;
         }
         destroyRecognizer();
@@ -143,9 +147,9 @@ public class VoiceAssistantManager {
                 destroyRecognizer();
                 if (destroyed) return;
                 if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                    speak("잘 듣지 못했어요. 다시 말씀해 주세요.", CONTINUE_PREFIX + "retry");
+                    speak("잘 듣지 못했어요. 다시 말씀해 주세요.", CONTINUE_PREFIX + "retry", true);
                 } else {
-                    speak("음성 인식을 다시 시도할게요.", CONTINUE_PREFIX + "error");
+                    speak("음성 인식을 다시 시도할게요.", CONTINUE_PREFIX + "error", true);
                 }
             }
 
@@ -170,34 +174,174 @@ public class VoiceAssistantManager {
 
     private void handleCommand(String text) {
         if (text == null || text.isEmpty()) {
-            speak("잘 듣지 못했어요. 다시 말씀해 주세요.", CONTINUE_PREFIX + "empty");
+            speak("잘 듣지 못했어요. 다시 말씀해 주세요.", CONTINUE_PREFIX + "empty", true);
             return;
         }
         String compact = text.replace(" ", "");
+
         if (compact.contains("종료") || compact.contains("그만") || compact.contains("끝내")) {
-            speak("네. 음성 비서를 종료할게요.", "goodbye");
+            speak("네. 음성 비서를 종료할게요.", "goodbye", true);
             activity.finishAfterDelay(1400);
+            return;
+        }
+
+        if (compact.contains("다시말해") || compact.contains("다시읽어") || compact.contains("한번더")) {
+            String repeat = lastSpoken.isEmpty() ? "아직 다시 읽을 내용이 없습니다." : lastSpoken;
+            speak(repeat, CONTINUE_PREFIX + "repeat", false);
             return;
         }
 
         if ((compact.contains("오늘") && (compact.contains("알림") || compact.contains("일정") || compact.contains("할일") || compact.contains("브리핑")))
                 || compact.contains("오늘뭐있어") || compact.contains("오늘뭐해야")) {
-            speak(buildBriefingForDate(LocalDate.now(ZoneId.of("Asia/Seoul")), "오늘"), CONTINUE_PREFIX + "today");
+            speak(buildBriefingForDate(LocalDate.now(ZoneId.of("Asia/Seoul")), "오늘"), CONTINUE_PREFIX + "today", true);
             return;
         }
+
         if (compact.contains("내일") && (compact.contains("알림") || compact.contains("일정") || compact.contains("할일"))) {
-            speak(buildBriefingForDate(LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1), "내일"), CONTINUE_PREFIX + "tomorrow");
+            speak(buildBriefingForDate(LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1), "내일"), CONTINUE_PREFIX + "tomorrow", true);
+            return;
+        }
+
+        if (compact.contains("미완료") || compact.contains("밀린일") || compact.contains("지난일정") || compact.contains("못끝낸")) {
+            speak(buildOverdueBriefing(), CONTINUE_PREFIX + "overdue", true);
+            return;
+        }
+
+        if (compact.contains("다음일정") || compact.contains("다음할일") || compact.equals("다음") || compact.contains("다음거")) {
+            Item next = findNextTask();
+            if (next == null) {
+                clearCurrentTask();
+                speak("앞으로 예정된 일정이 없습니다.", CONTINUE_PREFIX + "next_none", true);
+            } else {
+                setCurrentTask(next);
+                speak(formatTask(next, "다음 일정은 "), CONTINUE_PREFIX + "next", true);
+            }
+            return;
+        }
+
+        if ((compact.contains("몇개") || compact.contains("몇건") || compact.contains("몇개남"))
+                && (compact.contains("일정") || compact.contains("할일") || compact.contains("남"))) {
+            int count = LocalTaskStore.getPendingTasks(activity).length();
+            speak(count == 0 ? "남아 있는 할 일이 없습니다." : "현재 남아 있는 할 일은 " + count + "건입니다.", CONTINUE_PREFIX + "count", true);
+            return;
+        }
+
+        if (compact.contains("완료처리") || compact.equals("완료") || compact.contains("끝냈어") || compact.contains("끝났어")) {
+            Item target = resolveCurrentOrNextTask();
+            if (target == null) {
+                speak("완료 처리할 일정이 없습니다.", CONTINUE_PREFIX + "complete_none", true);
+            } else {
+                sendComplete(target);
+                speak(target.title + "을 완료 처리할게요.", CONTINUE_PREFIX + "complete", true);
+                clearCurrentTask();
+            }
+            return;
+        }
+
+        if ((compact.contains("10분") || compact.contains("십분")) && (compact.contains("미뤄") || compact.contains("뒤로") || compact.contains("나중"))) {
+            Item target = resolveCurrentOrNextTask();
+            if (target == null) {
+                speak("미룰 일정이 없습니다.", CONTINUE_PREFIX + "snooze_none", true);
+            } else {
+                sendSnooze(target);
+                speak(target.title + " 알림을 10분 뒤로 미뤘습니다.", CONTINUE_PREFIX + "snooze", true);
+            }
             return;
         }
 
         askServerAi(text);
     }
 
+    private Item resolveCurrentOrNextTask() {
+        if (!currentTaskId.isEmpty()) {
+            JSONObject r = LocalTaskStore.findTask(activity, currentTaskId);
+            Item item = toItem(r);
+            if (item != null) return item;
+        }
+        Item next = findNextTask();
+        if (next != null) setCurrentTask(next);
+        return next;
+    }
+
+    private void sendComplete(Item item) {
+        Intent i = new Intent(activity, ReminderActionReceiver.class);
+        i.setAction(ReminderActionReceiver.ACTION_COMPLETE);
+        i.putExtra("id", item.id);
+        i.putExtra("title", item.title);
+        activity.sendBroadcast(i);
+    }
+
+    private void sendSnooze(Item item) {
+        Intent i = new Intent(activity, ReminderActionReceiver.class);
+        i.setAction(ReminderActionReceiver.ACTION_SNOOZE);
+        i.putExtra("id", item.id);
+        i.putExtra("title", item.title);
+        activity.sendBroadcast(i);
+    }
+
+    private void setCurrentTask(Item item) {
+        currentTaskId = item == null ? "" : item.id;
+        currentTaskTitle = item == null ? "" : item.title;
+    }
+
+    private void clearCurrentTask() {
+        currentTaskId = "";
+        currentTaskTitle = "";
+    }
+
+    private Item findNextTask() {
+        JSONArray records = LocalTaskStore.getPendingTasks(activity);
+        Item best = null;
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Asia/Seoul"));
+        for (int i = 0; i < records.length(); i++) {
+            Item item = toItem(records.optJSONObject(i));
+            if (item == null || item.when.isBefore(now)) continue;
+            if (best == null || item.when.isBefore(best.when)) best = item;
+        }
+        return best;
+    }
+
+    private Item toItem(JSONObject r) {
+        if (r == null) return null;
+        JSONObject d = r.optJSONObject("data");
+        if (d == null) return null;
+        ZonedDateTime due = parseDueAt(d.optString("dueAt", ""));
+        if (due == null) return null;
+        return new Item(r.optString("id", ""), due, d.optString("title", "할 일"));
+    }
+
+    private String formatTask(Item item, String prefix) {
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("M월 d일 a h시 m분", Locale.KOREAN);
+        String time = item.when.format(fmt).replace(" 0분", "");
+        return prefix + time + "에 " + item.title + "입니다.";
+    }
+
+    private String buildOverdueBriefing() {
+        JSONArray records = LocalTaskStore.getPendingTasks(activity);
+        List<Item> overdue = new ArrayList<>();
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Asia/Seoul"));
+        for (int i = 0; i < records.length(); i++) {
+            Item item = toItem(records.optJSONObject(i));
+            if (item != null && item.when.isBefore(now)) overdue.add(item);
+        }
+        overdue.sort(Comparator.comparing(i -> i.when));
+        if (overdue.isEmpty()) return "미완료된 지난 일정은 없습니다.";
+
+        StringBuilder sb = new StringBuilder("미완료된 지난 일정은 ").append(overdue.size()).append("건입니다. ");
+        int limit = Math.min(3, overdue.size());
+        for (int i = 0; i < limit; i++) {
+            if (i > 0) sb.append(" 그리고 ");
+            sb.append(overdue.get(i).title);
+        }
+        if (overdue.size() > limit) sb.append(" 외에 ").append(overdue.size() - limit).append("건이 더 있습니다.");
+        return sb.toString();
+    }
+
     private void askServerAi(String text) {
         activity.setStatus("AI가 확인하고 있어요…");
         new Thread(() -> {
             try {
-                SharedPreferences prefs = activity.getSharedPreferences(MainActivity.PREFS, android.content.Context.MODE_PRIVATE);
+                SharedPreferences prefs = activity.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE);
                 String token = prefs.getString("token", "");
                 if (token == null || token.isEmpty()) {
                     speakOnUi("먼저 MyDesk AI에 연결 코드로 로그인해 주세요.", CONTINUE_PREFIX + "auth");
@@ -249,7 +393,7 @@ public class VoiceAssistantManager {
     }
 
     private void speakOnUi(String text, String id) {
-        activity.runOnUiThread(() -> speak(text, id));
+        activity.runOnUiThread(() -> speak(text, id, true));
     }
 
     private String cleanForSpeech(String raw) {
@@ -267,15 +411,11 @@ public class VoiceAssistantManager {
         int overdue = 0;
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
         for (int i = 0; i < records.length(); i++) {
-            JSONObject r = records.optJSONObject(i);
-            if (r == null) continue;
-            JSONObject d = r.optJSONObject("data");
-            if (d == null) continue;
-            ZonedDateTime due = parseDueAt(d.optString("dueAt", ""));
-            if (due == null) continue;
-            LocalDate date = due.toLocalDate();
+            Item item = toItem(records.optJSONObject(i));
+            if (item == null) continue;
+            LocalDate date = item.when.toLocalDate();
             if (date.isBefore(today)) overdue++;
-            if (date.equals(targetDate)) sameDay.add(new Item(due, d.optString("title", "할 일")));
+            if (date.equals(targetDate)) sameDay.add(item);
         }
         sameDay.sort(Comparator.comparing(i -> i.when));
 
@@ -297,6 +437,7 @@ public class VoiceAssistantManager {
         sb.append("이 있습니다.");
         if (sameDay.size() > limit) sb.append(" 그 외에 ").append(sameDay.size() - limit).append("건이 더 있습니다.");
         if ("오늘".equals(label) && overdue > 0) sb.append(" 미완료된 지난 일정은 ").append(overdue).append("건입니다.");
+        if (!sameDay.isEmpty()) setCurrentTask(sameDay.get(0));
         return sb.toString();
     }
 
@@ -309,8 +450,9 @@ public class VoiceAssistantManager {
         return null;
     }
 
-    private void speak(String text, String id) {
+    private void speak(String text, String id, boolean remember) {
         if (tts == null || !ttsReady || text == null || text.isEmpty() || destroyed) return;
+        if (remember) lastSpoken = text;
         activity.setStatus(text);
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id);
     }
@@ -334,8 +476,13 @@ public class VoiceAssistantManager {
     }
 
     private static class Item {
+        final String id;
         final ZonedDateTime when;
         final String title;
-        Item(ZonedDateTime when, String title) { this.when = when; this.title = title; }
+        Item(String id, ZonedDateTime when, String title) {
+            this.id = id;
+            this.when = when;
+            this.title = title;
+        }
     }
 }
