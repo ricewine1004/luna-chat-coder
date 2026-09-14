@@ -22,6 +22,17 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
+      - name: Stamp Android shell version
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/mydesk/ai/MainActivity.java')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('private static final String WEB_SHELL_VERSION = "0.3.8";', 'private static final String WEB_SHELL_VERSION = "0.4.1";')
+          s = s.replace('MyDeskAI-Android/0.3.8', 'MyDeskAI-Android/0.4.1')
+          p.write_text(s, encoding='utf-8')
+          PY
       - name: Generate MyDesk signature sound resource
         shell: bash
         run: |
@@ -64,14 +75,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp app/build/outputs/apk/release/app-release-unsigned.apk MyDesk_AI_0.3.8_unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk MyDesk_AI_0.4.1_unsigned.apk
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -type f -path '*/lib/apksigner.jar' | sort -V | tail -n 1)
           test -n "$APKSIGNER_JAR"
           cp "$APKSIGNER_JAR" apksigner.jar
       - uses: actions/upload-artifact@v4
         with:
-          name: MyDesk_AI_0.3.8_UNSIGNED_AND_SIGNER
+          name: MyDesk_AI_0.4.1_UNSIGNED_AND_SIGNER
           path: |
-            mydesk-apk/MyDesk_AI_0.3.8_unsigned.apk
+            mydesk-apk/MyDesk_AI_0.4.1_unsigned.apk
             mydesk-apk/apksigner.jar
           if-no-files-found: error
