@@ -1,12 +1,16 @@
 package com.mydesk.ai;
 
+import android.app.AlarmManager;
+import android.app.PendingIntent;
 import android.app.job.JobInfo;
 import android.app.job.JobParameters;
 import android.app.job.JobScheduler;
 import android.app.job.JobService;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Build;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -21,19 +25,51 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ReminderSyncJobService extends JobService {
     private static final int JOB_ID = 240901;
-    private static final long MANUAL_SYNC_MIN_INTERVAL_MS = 60_000L;
+    private static final int FAST_SYNC_REQUEST_CODE = 240902;
+    private static final long MANUAL_SYNC_MIN_INTERVAL_MS = 10_000L;
+    private static final long FAST_SYNC_INTERVAL_MS = 5 * 60 * 1000L;
     private static final AtomicBoolean SYNC_RUNNING = new AtomicBoolean(false);
 
     public static void schedule(Context context) {
         UpdateChecker.check(context);
-        JobScheduler js = (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
-        if (js == null) return;
-        JobInfo job = new JobInfo.Builder(JOB_ID, new ComponentName(context, ReminderSyncJobService.class))
-                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                .setPeriodic(15 * 60 * 1000L)
-                .setPersisted(true)
-                .build();
-        js.schedule(job);
+        Context app = context.getApplicationContext();
+        JobScheduler js = (JobScheduler) app.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+        if (js != null) {
+            JobInfo job = new JobInfo.Builder(JOB_ID, new ComponentName(app, ReminderSyncJobService.class))
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                    .setPeriodic(15 * 60 * 1000L)
+                    .setPersisted(true)
+                    .build();
+            js.schedule(job);
+        }
+        scheduleFastSync(app);
+    }
+
+    public static void scheduleFastSync(Context context) {
+        Context app = context.getApplicationContext();
+        AlarmManager am = (AlarmManager) app.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+
+        Intent intent = new Intent(app, FastSyncReceiver.class);
+        PendingIntent pi = PendingIntent.getBroadcast(
+                app,
+                FAST_SYNC_REQUEST_CODE,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        long when = System.currentTimeMillis() + FAST_SYNC_INTERVAL_MS;
+
+        try {
+            if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
+            } else if (Build.VERSION.SDK_INT >= 23) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, when, pi);
+            }
+        } catch (SecurityException e) {
+            if (Build.VERSION.SDK_INT >= 23) am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, when, pi);
+            else am.set(AlarmManager.RTC_WAKEUP, when, pi);
+        }
     }
 
     public static void syncNow(Context context) {
@@ -61,6 +97,7 @@ public class ReminderSyncJobService extends JobService {
             finally {
                 SYNC_RUNNING.set(false);
                 UpdateChecker.check(this);
+                scheduleFastSync(this);
                 jobFinished(params, false);
             }
         }).start();
@@ -81,7 +118,7 @@ public class ReminderSyncJobService extends JobService {
                 ? "1970-01-01T00:00:00.000Z"
                 : prefs.getString("server_sync_since", "1970-01-01T00:00:00.000Z");
         String encodedSince = URLEncoder.encode(since, StandardCharsets.UTF_8.name());
-        URL url = new URL(MainActivity.APP_URL + "/api/sync?since=" + encodedSince);
+        URL url = new URL(MainActivity.APP_URL + "/api/sync?since=" + encodedSince + "&kinds=task");
         HttpURLConnection c = (HttpURLConnection) url.openConnection();
         c.setConnectTimeout(10000);
         c.setReadTimeout(10000);
