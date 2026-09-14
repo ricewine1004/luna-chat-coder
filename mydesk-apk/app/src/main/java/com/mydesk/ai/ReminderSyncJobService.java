@@ -21,6 +21,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ReminderSyncJobService extends JobService {
@@ -28,6 +29,8 @@ public class ReminderSyncJobService extends JobService {
     private static final int FAST_SYNC_REQUEST_CODE = 240902;
     private static final long MANUAL_SYNC_MIN_INTERVAL_MS = 10_000L;
     private static final long FAST_SYNC_INTERVAL_MS = 5 * 60 * 1000L;
+    private static final long SYNC_OVERLAP_MS = 10 * 60 * 1000L;
+    private static final long FULL_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000L;
     private static final AtomicBoolean SYNC_RUNNING = new AtomicBoolean(false);
 
     public static void schedule(Context context) {
@@ -113,10 +116,19 @@ public class ReminderSyncJobService extends JobService {
         String token = prefs.getString("token", "");
         if (token.isEmpty()) return;
 
+        long nowMs = System.currentTimeMillis();
         boolean needVoiceCacheBootstrap = !prefs.contains("voice_task_cache");
-        String since = needVoiceCacheBootstrap
-                ? "1970-01-01T00:00:00.000Z"
-                : prefs.getString("server_sync_since", "1970-01-01T00:00:00.000Z");
+        long lastFullSync = prefs.getLong("last_full_task_sync", 0L);
+        boolean fullSync = needVoiceCacheBootstrap || nowMs - lastFullSync >= FULL_SYNC_INTERVAL_MS;
+
+        String since;
+        if (fullSync) {
+            since = "1970-01-01T00:00:00.000Z";
+        } else {
+            String saved = prefs.getString("server_sync_since", "1970-01-01T00:00:00.000Z");
+            since = overlapSince(saved);
+        }
+
         String encodedSince = URLEncoder.encode(since, StandardCharsets.UTF_8.name());
         URL url = new URL(MainActivity.APP_URL + "/api/sync?since=" + encodedSince + "&kinds=task");
         HttpURLConnection c = (HttpURLConnection) url.openConnection();
@@ -143,8 +155,19 @@ public class ReminderSyncJobService extends JobService {
         }
 
         String serverTime = root.optString("serverTime", "");
-        if (!serverTime.isEmpty()) {
-            prefs.edit().putString("server_sync_since", serverTime).apply();
+        SharedPreferences.Editor editor = prefs.edit();
+        if (!serverTime.isEmpty()) editor.putString("server_sync_since", serverTime);
+        if (fullSync) editor.putLong("last_full_task_sync", nowMs);
+        editor.apply();
+    }
+
+    private static String overlapSince(String saved) {
+        try {
+            long ms = Instant.parse(saved).toEpochMilli();
+            long overlap = Math.max(0L, ms - SYNC_OVERLAP_MS);
+            return Instant.ofEpochMilli(overlap).toString();
+        } catch (Exception ignored) {
+            return "1970-01-01T00:00:00.000Z";
         }
     }
 }
