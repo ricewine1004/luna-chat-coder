@@ -13,11 +13,6 @@ import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
 
-import java.time.DayOfWeek;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-
 public class ReminderReceiver extends BroadcastReceiver {
     public static final String SOUND_CHANNEL_ID = "mydesk_signature_sound_v3";
     private static final String OLD_SOUND_CHANNEL_ID_V2 = "mydesk_reminders_sound_v2";
@@ -29,6 +24,10 @@ public class ReminderReceiver extends BroadcastReceiver {
         String title = intent.getStringExtra("title");
         String id = intent.getStringExtra("id");
         String repeatRule = intent.getStringExtra("repeatRule");
+        int repeatDays = intent.getIntExtra("repeatDays", 0);
+        long baseWhen = intent.getLongExtra("baseWhen", 0L);
+        int remindBeforeMinutes = intent.getIntExtra("remindBeforeMinutes", 0);
+
         if (title == null || title.isEmpty()) title = "확인할 시간이 됐습니다.";
         if (id == null) id = "reminder";
         if (repeatRule == null) repeatRule = "";
@@ -37,22 +36,34 @@ public class ReminderReceiver extends BroadcastReceiver {
         open.putExtra("reminder_id", id);
         open.putExtra("reminder_title", title);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent content = PendingIntent.getActivity(context, id.hashCode(), open,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent content = PendingIntent.getActivity(
+                context,
+                id.hashCode(),
+                open,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
 
         Intent completeIntent = new Intent(context, ReminderActionReceiver.class);
         completeIntent.setAction(ReminderActionReceiver.ACTION_COMPLETE);
         completeIntent.putExtra("id", id);
         completeIntent.putExtra("title", title);
-        PendingIntent complete = PendingIntent.getBroadcast(context, id.hashCode() ^ 0x3311, completeIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent complete = PendingIntent.getBroadcast(
+                context,
+                id.hashCode() ^ 0x3311,
+                completeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
 
         Intent snoozeIntent = new Intent(context, ReminderActionReceiver.class);
         snoozeIntent.setAction(ReminderActionReceiver.ACTION_SNOOZE);
         snoozeIntent.putExtra("id", id);
         snoozeIntent.putExtra("title", title);
-        PendingIntent snooze = PendingIntent.getBroadcast(context, id.hashCode() ^ 0x7722, snoozeIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent snooze = PendingIntent.getBroadcast(
+                context,
+                id.hashCode() ^ 0x7722,
+                snoozeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
 
         Notification.Builder b = new Notification.Builder(context, SOUND_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -70,20 +81,42 @@ public class ReminderReceiver extends BroadcastReceiver {
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(id.hashCode(), b.build());
 
-        long next = nextOccurrence(repeatRule);
-        if (next > 0) ReminderScheduler.schedule(context, id, title, next, repeatRule);
+        if (!repeatRule.isEmpty() && baseWhen > 0L) {
+            ReminderScheduler.scheduleRecurringNext(
+                    context,
+                    id,
+                    title,
+                    baseWhen,
+                    repeatRule,
+                    repeatDays,
+                    remindBeforeMinutes,
+                    System.currentTimeMillis()
+            );
+        }
     }
 
     public static void ensureSoundChannel(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+
         NotificationManager nm = context.getSystemService(NotificationManager.class);
         if (nm == null) return;
 
-        if (nm.getNotificationChannel(OLD_SOUND_CHANNEL_ID_V1) != null) nm.deleteNotificationChannel(OLD_SOUND_CHANNEL_ID_V1);
-        if (nm.getNotificationChannel(OLD_SOUND_CHANNEL_ID_V2) != null) nm.deleteNotificationChannel(OLD_SOUND_CHANNEL_ID_V2);
+        if (nm.getNotificationChannel(OLD_SOUND_CHANNEL_ID_V1) != null) {
+            nm.deleteNotificationChannel(OLD_SOUND_CHANNEL_ID_V1);
+        }
+        if (nm.getNotificationChannel(OLD_SOUND_CHANNEL_ID_V2) != null) {
+            nm.deleteNotificationChannel(OLD_SOUND_CHANNEL_ID_V2);
+        }
         if (nm.getNotificationChannel(SOUND_CHANNEL_ID) != null) return;
 
-        Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + context.getPackageName() + "/" + R.raw.mydesk_signature_b);
+        Uri soundUri = Uri.parse(
+                ContentResolver.SCHEME_ANDROID_RESOURCE
+                        + "://"
+                        + context.getPackageName()
+                        + "/"
+                        + R.raw.mydesk_signature_b
+        );
+
         AudioAttributes attributes = new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -102,25 +135,5 @@ public class ReminderReceiver extends BroadcastReceiver {
         channel.setSound(soundUri, attributes);
         channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         nm.createNotificationChannel(channel);
-    }
-
-    private long nextOccurrence(String repeatRule) {
-        if (repeatRule == null || repeatRule.isEmpty()) return 0L;
-        ZoneId zone = ZoneId.of("Asia/Seoul");
-        ZonedDateTime now = ZonedDateTime.ofInstant(Instant.ofEpochMilli(System.currentTimeMillis()), zone);
-        ZonedDateTime next;
-        if ("DAILY".equals(repeatRule)) {
-            next = now.plusDays(1);
-        } else if ("WEEKLY".equals(repeatRule)) {
-            next = now.plusWeeks(1);
-        } else if ("WEEKDAYS".equals(repeatRule)) {
-            next = now.plusDays(1);
-            while (next.getDayOfWeek() == DayOfWeek.SATURDAY || next.getDayOfWeek() == DayOfWeek.SUNDAY) {
-                next = next.plusDays(1);
-            }
-        } else {
-            return 0L;
-        }
-        return next.toInstant().toEpochMilli();
     }
 }
