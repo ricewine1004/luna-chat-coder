@@ -1,0 +1,24 @@
+name: Diagnose MyDesk Part3
+on:
+  push:
+    branches: [ "mydesk-ai-apk-build" ]
+    paths:
+      - '.github/workflows/diagnose-mydesk-part3.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hash part3 blocks
+        run: |
+          python3 - <<'PY'
+          import hashlib,re
+          from pathlib import Path
+          s=Path('mydesk-windows/CommonPatch042Part03.cs').read_text()
+          v=re.search(r'"([A-Za-z0-9+/=]+)"',s).group(1)
+          for i in range(0,len(v),1000):
+              b=v[i:i+1000]
+              print(f'{i:05d}-{i+len(b):05d}',hashlib.sha256(b.encode()).hexdigest())
+          PY
