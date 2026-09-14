@@ -60,8 +60,8 @@ jobs:
                   ('calendar picker', 'openNativePicker' in app),
                   ('limited repeat', 'DAILY_LIMITED' in app and 'DAILY_LIMITED' in server),
                   ('repeat days', 'repeatDays' in app and 'repeatDays' in server),
-                  ('mobile schedule nav', 'data-view="schedule"' in html),
-                  ('mobile layout', '@media' in css and 'bottom-nav' in css),
+                  ('mobile schedule nav', 'data-page="schedule"' in html and '일정·미팅' in html),
+                  ('mobile layout', '.mobile-nav' in css and 'repeat(6' in css),
                   ('meeting records', 'meeting' in app and 'meeting' in server),
               ]
               failed = [name for name, ok in checks if not ok]
