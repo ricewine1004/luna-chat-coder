@@ -29,12 +29,35 @@ jobs:
           from pathlib import Path
           p = Path('app/src/main/java/com/mydesk/ai/MainActivity.java')
           s = p.read_text(encoding='utf-8')
-          s = s.replace('private static final String WEB_SHELL_VERSION = "0.3.8";', 'private static final String WEB_SHELL_VERSION = "0.4.2-r3";')
-          s = s.replace('private static final String WEB_SHELL_VERSION = "0.4.1";', 'private static final String WEB_SHELL_VERSION = "0.4.2-r3";')
-          s = s.replace('private static final String WEB_SHELL_VERSION = "0.4.2";', 'private static final String WEB_SHELL_VERSION = "0.4.2-r3";')
-          s = s.replace('MyDeskAI-Android/0.3.8', 'MyDeskAI-Android/0.4.2')
-          s = s.replace('MyDeskAI-Android/0.4.1', 'MyDeskAI-Android/0.4.2')
+          for old in ['0.3.8','0.4.1','0.4.2']:
+              s = s.replace(f'private static final String WEB_SHELL_VERSION = "{old}";', 'private static final String WEB_SHELL_VERSION = "0.4.2-r3";')
+          for old in ['0.3.8','0.4.1']:
+              s = s.replace(f'MyDeskAI-Android/{old}', 'MyDeskAI-Android/0.4.2')
           p.write_text(s, encoding='utf-8')
+          PY
+      - name: Verify Android reminder contracts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          base = Path('app/src/main/java/com/mydesk/ai')
+          files = {p.name: p.read_text(encoding='utf-8') for p in base.glob('*.java')}
+          checks = {
+              'shell 0.4.2-r3': '0.4.2-r3' in files['MainActivity.java'],
+              'voice limited daily parser': 'DAILY_LIMITED' in files['MainActivity.java'] and 'repeatDays' in files['MainActivity.java'],
+              'limited repeat scheduler': 'DAILY_LIMITED' in files['ReminderScheduler.java'] and 'clampRepeatDays' in files['ReminderScheduler.java'],
+              'completion cancels all': 'cancelAll(context, id)' in files['ReminderActionReceiver.java'],
+              'receiver schedules next': 'scheduleRecurringNext' in files['ReminderReceiver.java'],
+              '5 minute fast sync': 'FAST_SYNC_INTERVAL_MS = 5 * 60 * 1000L' in files['ReminderSyncJobService.java'],
+              'sync overlap': 'SYNC_OVERLAP_MS' in files['ReminderSyncJobService.java'] and 'overlapSince' in files['ReminderSyncJobService.java'],
+              'full recovery sync': 'FULL_SYNC_INTERVAL_MS' in files['ReminderSyncJobService.java'],
+              'task-only sync': '&kinds=task' in files['ReminderSyncJobService.java'],
+              'boot immediate sync': 'ReminderSyncJobService.syncNow(context)' in files['BootReceiver.java'],
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Android feature contract failed: ' + ', '.join(failed))
+          print('Android reminder/sync contracts: PASS')
           PY
       - name: Generate MyDesk signature sound resource
         shell: bash
