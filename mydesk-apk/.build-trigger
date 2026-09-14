@@ -1,0 +1,4 @@
+MyDesk AI Android release build trigger
+Date: 2026-09-15
+Target shared payload: shared-common-web-r42
+Purpose: produce a verified release APK after the common update/mobile schedule-meeting parity work.
