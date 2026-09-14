@@ -6,7 +6,7 @@ namespace MyDeskAI.Windows;
 
 public sealed class MainForm : Form
 {
-    private const string AppVersion = "0.4.0";
+    private const string AppVersion = "0.4.1";
     private const string AppBaseUrl = "https://mydesk-ai.mydesk-ai.workers.dev";
     private const string AppHost = "mydesk-ai.mydesk-ai.workers.dev";
     private readonly WebView2 webView = new();
