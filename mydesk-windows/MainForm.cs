@@ -6,7 +6,7 @@ namespace MyDeskAI.Windows;
 
 public sealed class MainForm : Form
 {
-    private const string AppVersion = "0.4.1";
+    private const string AppVersion = "0.4.2";
     private const string AppBaseUrl = "https://mydesk-ai.mydesk-ai.workers.dev";
     private const string AppHost = "mydesk-ai.mydesk-ai.workers.dev";
     private readonly WebView2 webView = new();
@@ -39,7 +39,7 @@ public sealed class MainForm : Form
     {
         base.OnLoad(e);
 
-        Text = "MyDesk AI - 기존 접속 키 복구 및 공통 업데이트 확인 중...";
+        Text = "MyDesk AI - 기존 접속 키 보존/공통 업데이트 검증 중...";
         UseWaitCursor = true;
         CommonDeployResult deployResult;
         try
@@ -51,7 +51,7 @@ public sealed class MainForm : Form
             deployResult = new CommonDeployResult(
                 true,
                 false,
-                "공통 업데이트 확인 중 오류가 발생했습니다. 새 접속 키는 만들지 않았습니다.\n" + ex.Message,
+                "공통 업데이트 확인 중 오류가 발생했습니다. 기존 접속 키는 변경하지 않았습니다.\n" + ex.Message,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "MyDesk AI", $"common-deploy-{AppVersion}.log"));
         }
@@ -64,8 +64,8 @@ public sealed class MainForm : Form
         if (deployResult.Attempted && !deployResult.Success)
         {
             MessageBox.Show(
-                deployResult.Message + "\n\n로그: " + deployResult.LogPath,
-                "MyDesk AI 접속 키 복구/공통 업데이트",
+                deployResult.Message + "\n\n자동 복구/백업 로그: " + deployResult.LogPath,
+                "MyDesk AI 공통 업데이트",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
