@@ -31,7 +31,7 @@ public class MainActivity extends android.app.Activity {
     public static final String CHANNEL_ID = "mydesk_reminders";
     public static final String PREFS = "mydesk_native";
     private static final String PREF_TOKEN = "token";
-    private static final String WEB_SHELL_VERSION = "0.3.8";
+    private static final String WEB_SHELL_VERSION = "0.4.2-r3";
     private static final String PREF_WEB_SHELL_VERSION = "web_shell_version";
     private WebView webView;
     private String launchReminderId = "";
@@ -61,7 +61,7 @@ public class MainActivity extends android.app.Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.3.8");
+        s.setUserAgentString(s.getUserAgentString() + " MyDeskAI-Android/0.4.2");
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new NativeBridge(), "MyDeskNative");
         webView.setWebViewClient(new WebViewClient() {
@@ -81,7 +81,7 @@ public class MainActivity extends android.app.Activity {
             webView.clearCache(true);
             nativePrefs.edit().putString(PREF_WEB_SHELL_VERSION, WEB_SHELL_VERSION).apply();
         }
-        webView.loadUrl(APP_URL + "/?client=android&v=" + WEB_SHELL_VERSION);
+        webView.loadUrl(APP_URL + "/?client=android&v=" + WEB_SHELL_VERSION + "&cb=" + System.currentTimeMillis());
     }
 
     private void requestServiceWorkerUpdate(WebView view) {
@@ -189,15 +189,26 @@ public class MainActivity extends android.app.Activity {
             ParsedReminder parsed = parseReminder(text);
             if (parsed != null) {
                 String id = "local-" + Math.abs(text.hashCode()) + "-" + parsed.when;
-                ReminderScheduler.schedule(MainActivity.this, id, parsed.title, parsed.when, parsed.repeatRule);
+                ReminderScheduler.schedule(MainActivity.this, id, parsed.title, parsed.when, parsed.repeatRule, parsed.repeatDays);
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "알림 예약: " + parsed.displayTime, Toast.LENGTH_SHORT).show());
             }
         }
     }
 
     static class ParsedReminder {
-        long when; String title; String displayTime; String repeatRule;
-        ParsedReminder(long w, String t, String d, String r) { when = w; title = t; displayTime = d; repeatRule = r; }
+        long when;
+        String title;
+        String displayTime;
+        String repeatRule;
+        int repeatDays;
+
+        ParsedReminder(long w, String t, String d, String r, int days) {
+            when = w;
+            title = t;
+            displayTime = d;
+            repeatRule = r;
+            repeatDays = days;
+        }
     }
 
     private ParsedReminder parseReminder(String raw) {
@@ -208,19 +219,30 @@ public class MainActivity extends android.app.Activity {
         ZoneId zone = ZoneId.of("Asia/Seoul");
         ZonedDateTime now = ZonedDateTime.now(zone);
         String repeatRule = "";
-        if (text.contains("매일")) repeatRule = "DAILY";
-        else if (text.contains("평일마다") || text.contains("평일 매일") || text.contains("매 평일")) repeatRule = "WEEKDAYS";
-        else if (text.contains("매주")) repeatRule = "WEEKLY";
+        int repeatDays = 0;
+
+        Matcher limitedRepeat = Pattern.compile("(?:최대\\s*)?([2-7])\\s*일(?:간)?\\s*(?:동안\\s*)?매일|매일\\s*(?:최대\\s*)?([2-7])\\s*일(?:간)?").matcher(text);
+        if (limitedRepeat.find()) {
+            repeatRule = "DAILY_LIMITED";
+            String value = limitedRepeat.group(1) != null ? limitedRepeat.group(1) : limitedRepeat.group(2);
+            repeatDays = Integer.parseInt(value);
+        } else if (text.contains("평일마다") || text.contains("평일 매일") || text.contains("매 평일")) {
+            repeatRule = "WEEKDAYS";
+        } else if (text.contains("매주")) {
+            repeatRule = "WEEKLY";
+        } else if (text.contains("매일")) {
+            repeatRule = "DAILY";
+        }
 
         Matcher relMin = Pattern.compile("(\\d+)\\s*분\\s*(?:뒤|후)").matcher(text);
         if (relMin.find()) {
             int mins = Math.min(10080, Integer.parseInt(relMin.group(1)));
-            return new ParsedReminder(now.plusMinutes(mins).toInstant().toEpochMilli(), cleanupTitle(text), mins + "분 후", repeatRule);
+            return new ParsedReminder(now.plusMinutes(mins).toInstant().toEpochMilli(), cleanupTitle(text), mins + "분 후", repeatRule, repeatDays);
         }
         Matcher relHour = Pattern.compile("(\\d+)\\s*시간\\s*(?:뒤|후)").matcher(text);
         if (relHour.find()) {
             int hours = Math.min(168, Integer.parseInt(relHour.group(1)));
-            return new ParsedReminder(now.plusHours(hours).toInstant().toEpochMilli(), cleanupTitle(text), hours + "시간 후", repeatRule);
+            return new ParsedReminder(now.plusHours(hours).toInstant().toEpochMilli(), cleanupTitle(text), hours + "시간 후", repeatRule, repeatDays);
         }
 
         LocalDate date = null;
@@ -269,7 +291,7 @@ public class MainActivity extends android.app.Activity {
 
         ZonedDateTime target = ZonedDateTime.of(date, LocalTime.of(hour, minute), zone);
         if (!target.isAfter(now)) {
-            if ("DAILY".equals(repeatRule) || "WEEKDAYS".equals(repeatRule)) target = target.plusDays(1);
+            if ("DAILY".equals(repeatRule) || "DAILY_LIMITED".equals(repeatRule) || "WEEKDAYS".equals(repeatRule)) target = target.plusDays(1);
             else if ("WEEKLY".equals(repeatRule)) target = target.plusWeeks(1);
             else target = now.plusMinutes(1);
         }
@@ -278,8 +300,9 @@ public class MainActivity extends android.app.Activity {
         }
 
         String display = target.format(DateTimeFormatter.ofPattern("M월 d일 HH:mm", Locale.KOREAN));
-        if (!repeatRule.isEmpty()) display += " 반복";
-        return new ParsedReminder(target.toInstant().toEpochMilli(), cleanupTitle(text), display, repeatRule);
+        if ("DAILY_LIMITED".equals(repeatRule)) display += " · " + repeatDays + "일간 매일";
+        else if (!repeatRule.isEmpty()) display += " 반복";
+        return new ParsedReminder(target.toInstant().toEpochMilli(), cleanupTitle(text), display, repeatRule, repeatDays);
     }
 
     private DayOfWeek weekdayFromText(String text) {
@@ -306,7 +329,7 @@ public class MainActivity extends android.app.Activity {
     private String cleanupTitle(String text) {
         String title = text
                 .replaceAll("(알려줘|알림\\s*해줘|기억해줘|리마인드\\s*해줘|잊지\\s*않게)", "")
-                .replaceAll("(매일|매주|평일마다|평일 매일|매 평일)", "")
+                .replaceAll("((?:최대\\s*)?[2-7]\\s*일(?:간)?\\s*(?:동안\\s*)?매일|매일\\s*(?:최대\\s*)?[2-7]\\s*일(?:간)?|매일|매주|평일마다|평일 매일|매 평일)", "")
                 .trim();
         return title.isEmpty() ? "MyDesk AI 알림" : title;
     }
