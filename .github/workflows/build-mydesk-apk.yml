@@ -29,8 +29,9 @@ jobs:
           from pathlib import Path
           p = Path('app/src/main/java/com/mydesk/ai/MainActivity.java')
           s = p.read_text(encoding='utf-8')
-          s = s.replace('private static final String WEB_SHELL_VERSION = "0.3.8";', 'private static final String WEB_SHELL_VERSION = "0.4.2";')
-          s = s.replace('private static final String WEB_SHELL_VERSION = "0.4.1";', 'private static final String WEB_SHELL_VERSION = "0.4.2";')
+          s = s.replace('private static final String WEB_SHELL_VERSION = "0.3.8";', 'private static final String WEB_SHELL_VERSION = "0.4.2-r3";')
+          s = s.replace('private static final String WEB_SHELL_VERSION = "0.4.1";', 'private static final String WEB_SHELL_VERSION = "0.4.2-r3";')
+          s = s.replace('private static final String WEB_SHELL_VERSION = "0.4.2";', 'private static final String WEB_SHELL_VERSION = "0.4.2-r3";')
           s = s.replace('MyDeskAI-Android/0.3.8', 'MyDeskAI-Android/0.4.2')
           s = s.replace('MyDeskAI-Android/0.4.1', 'MyDeskAI-Android/0.4.2')
           p.write_text(s, encoding='utf-8')
@@ -71,6 +72,8 @@ jobs:
               frames = b''.join(struct.pack('<h', max(-32767, min(32767, int(x * scale * 32767)))) for x in buf)
               wf.writeframes(frames)
           PY
+      - name: Run reminder unit tests
+        run: gradle :app:testReleaseUnitTest --no-daemon
       - name: Build unsigned release APK
         run: gradle :app:assembleRelease --no-daemon
       - name: Collect signing tool
