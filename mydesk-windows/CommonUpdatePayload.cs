@@ -8,9 +8,15 @@ internal static class CommonUpdatePayload
     internal static readonly string ZipBase64 =
         CommonPatch042Part01.Value +
         CommonPatch042Part02.Value +
-        CommonPatch042Part03A.Value +
+        CommonPatch042Part03A1.Value +
+        CommonPatch042Part03A2.Value +
+        CommonPatch042Part03A3.Value +
+        CommonPatch042Part03A4.Value +
         CommonPatch042Part03B.Value +
-        CommonPatch042Part03C.Value +
+        CommonPatch042Part03C1.Value +
+        CommonPatch042Part03C2.Value +
+        CommonPatch042Part03C3.Value +
+        CommonPatch042Part03C4.Value +
         CommonPatch042Part04.Value +
         CommonPatch042Part05.Value;
 }
