@@ -27,7 +27,7 @@ jobs:
           from pathlib import Path
 
           root = Path('mydesk-windows')
-          sequence = ['01','02','03A','03B','03C','04','05']
+          sequence = ['01','02','03A1','03A2','03A3','03A4','03B','03C1','03C2','03C3','03C4','04','05']
           values = []
           for suffix in sequence:
               text = (root / f'CommonPatch042Part{suffix}.cs').read_text(encoding='utf-8')
