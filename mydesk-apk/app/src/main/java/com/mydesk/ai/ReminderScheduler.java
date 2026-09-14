@@ -86,11 +86,25 @@ public final class ReminderScheduler {
     }
 
     public static void schedule(Context context, String id, String title, long when) {
-        schedule(context, id, title, when, "");
+        schedule(context, id, title, when, "", 0);
     }
 
     public static void schedule(Context context, String id, String title, long when, String repeatRule) {
-        scheduleOccurrence(context, id, title, when, when, normalizeRepeatRule(repeatRule), 0, 0);
+        schedule(context, id, title, when, repeatRule, 0);
+    }
+
+    public static void schedule(Context context, String id, String title, long when, String repeatRule, int repeatDays) {
+        String normalized = normalizeRepeatRule(repeatRule);
+        scheduleOccurrence(
+                context,
+                id,
+                title,
+                when,
+                when,
+                normalized,
+                clampRepeatDays(normalized, repeatDays),
+                0
+        );
     }
 
     public static void scheduleSnooze(Context context, String id, String title, long when) {
