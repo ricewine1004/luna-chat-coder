@@ -22,4 +22,12 @@ android {
             minifyEnabled false
         }
     }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
 }
