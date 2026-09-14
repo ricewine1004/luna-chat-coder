@@ -19,6 +19,52 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Verify common payload integrity and safety
+        shell: pwsh
+        run: |
+          @'
+          import base64, hashlib, io, re, zipfile
+          from pathlib import Path
+
+          root = Path('mydesk-windows')
+          values = []
+          for i in range(1, 6):
+              text = (root / f'CommonPatch042Part{i:02d}.cs').read_text(encoding='utf-8')
+              m = re.search(r'"([A-Za-z0-9+/=]+)"', text)
+              if not m:
+                  raise SystemExit(f'payload part {i} string missing')
+              values.append(m.group(1))
+          raw = base64.b64decode(''.join(values), validate=True)
+          sha = hashlib.sha256(raw).hexdigest()
+          manifest = (root / 'CommonUpdatePayload.cs').read_text(encoding='utf-8')
+          expected = re.search(r'Sha256 = "([0-9a-f]{64})"', manifest).group(1)
+          if sha != expected:
+              raise SystemExit(f'payload SHA mismatch: {sha} != {expected}')
+          with zipfile.ZipFile(io.BytesIO(raw)) as z:
+              names = sorted(n for n in z.namelist() if not n.endswith('/'))
+              required = sorted(['public/app.js','public/index.html','public/styles.css','public/sw.js','src/index.js'])
+              if names != required:
+                  raise SystemExit(f'unexpected payload files: {names}')
+              forbidden = {'wrangler.jsonc','PRIVATE_OWNER_CODE.txt','OWNER_KEY_HASH.txt'}
+              if forbidden.intersection(names):
+                  raise SystemExit('auth/config file leaked into payload')
+              app = z.read('public/app.js').decode('utf-8')
+              html = z.read('public/index.html').decode('utf-8')
+              server = z.read('src/index.js').decode('utf-8')
+              checks = [
+                  ('task repeat', 'id="taskRepeat"' in html),
+                  ('schedule repeat', 'id="scheduleRepeat"' in html),
+                  ('meeting repeat', 'id="meetingRepeat"' in html),
+                  ('calendar picker', 'openNativePicker' in app),
+                  ('limited repeat', 'DAILY_LIMITED' in app and 'DAILY_LIMITED' in server),
+                  ('mobile schedule nav', 'data-view="schedule"' in html),
+              ]
+              failed = [name for name, ok in checks if not ok]
+              if failed:
+                  raise SystemExit('feature contract failed: ' + ', '.join(failed))
+          print('Common payload integrity/safety/features: PASS', sha)
+          '@ | python -
+
       - name: Generate MyDesk AI Windows icon
         shell: pwsh
         run: |
@@ -75,6 +121,9 @@ jobs:
       - name: Restore Windows client
         run: dotnet restore mydesk-windows/MyDeskAI.Windows.csproj
 
+      - name: Build Windows client
+        run: dotnet build mydesk-windows/MyDeskAI.Windows.csproj -c Release --no-restore
+
       - name: Publish Windows client
         run: dotnet publish mydesk-windows/MyDeskAI.Windows.csproj -c Release -r win-x64 --self-contained true -o mydesk-windows/publish --no-restore
 
@@ -105,13 +154,13 @@ jobs:
       - name: Verify installer output
         shell: pwsh
         run: |
-          $installer = 'mydesk-windows\dist\MyDesk_AI_PC_AutoUpdate_0.4.1.exe'
+          $installer = 'mydesk-windows\dist\MyDesk_AI_PC_AutoUpdate_0.4.2.exe'
           if (-not (Test-Path $installer)) { throw 'Installer was not created' }
           Get-FileHash $installer -Algorithm SHA256 | Format-List
           Get-Item $installer | Format-List Name,Length,LastWriteTime
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MyDesk_AI_PC_AutoUpdate_0.4.1
-          path: mydesk-windows/dist/MyDesk_AI_PC_AutoUpdate_0.4.1.exe
+          name: MyDesk_AI_PC_AutoUpdate_0.4.2
+          path: mydesk-windows/dist/MyDesk_AI_PC_AutoUpdate_0.4.2.exe
           if-no-files-found: error
