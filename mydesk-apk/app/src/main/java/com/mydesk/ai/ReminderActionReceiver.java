@@ -31,11 +31,17 @@ public class ReminderActionReceiver extends BroadcastReceiver {
         if (nm != null) nm.cancel(id.hashCode());
 
         if (ACTION_SNOOZE.equals(action)) {
-            ReminderScheduler.schedule(context, id, title, System.currentTimeMillis() + 10L * 60L * 1000L, "");
+            ReminderScheduler.scheduleSnooze(
+                    context,
+                    id,
+                    title,
+                    System.currentTimeMillis() + 10L * 60L * 1000L
+            );
             return;
         }
 
         if (ACTION_COMPLETE.equals(action)) {
+            ReminderScheduler.cancelAll(context, id);
             Context app = context.getApplicationContext();
             final PendingResult pending = goAsync();
             new Thread(() -> {
@@ -58,7 +64,10 @@ public class ReminderActionReceiver extends BroadcastReceiver {
 
         JSONObject data = target.optJSONObject("data");
         if (data == null) data = new JSONObject();
+
         data.put("status", "done");
+        data.put("completedAt", java.time.Instant.now().toString());
+
         String now = java.time.Instant.now().toString();
         target.put("data", data);
         target.put("updatedAt", now);
@@ -75,34 +84,46 @@ public class ReminderActionReceiver extends BroadcastReceiver {
         u.setDoOutput(true);
         u.setRequestProperty("Authorization", "Bearer " + token);
         u.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
-        try (OutputStream os = u.getOutputStream()) { os.write(body); }
+        try (OutputStream os = u.getOutputStream()) {
+            os.write(body);
+        }
+
         int status = u.getResponseCode();
         u.disconnect();
 
         if (status >= 200 && status < 300) {
             LocalTaskStore.removeTask(context, id);
-            ReminderScheduler.cancel(context, id);
+            ReminderScheduler.cancelAll(context, id);
         }
     }
 
     private static JSONObject fetchTaskOnce(Context context, String token, String id) {
         try {
-            URL syncUrl = new URL(MainActivity.APP_URL + "/api/sync?since=1970-01-01T00:00:00.000Z");
+            URL syncUrl = new URL(MainActivity.APP_URL + "/api/sync?since=1970-01-01T00:00:00.000Z&kinds=task");
             HttpURLConnection c = (HttpURLConnection) syncUrl.openConnection();
             c.setConnectTimeout(10000);
             c.setReadTimeout(10000);
             c.setRequestProperty("Authorization", "Bearer " + token);
-            if (c.getResponseCode() != 200) { c.disconnect(); return null; }
+
+            if (c.getResponseCode() != 200) {
+                c.disconnect();
+                return null;
+            }
+
             StringBuilder sb = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
-                String line; while ((line = br.readLine()) != null) sb.append(line);
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line);
             }
             c.disconnect();
 
             JSONObject root = new JSONObject(sb.toString());
             JSONArray records = root.optJSONArray("records");
             if (records == null) return null;
+
             for (int i = 0; i < records.length(); i++) {
                 JSONObject r = records.optJSONObject(i);
                 if (r != null && id.equals(r.optString("id"))) return r;
