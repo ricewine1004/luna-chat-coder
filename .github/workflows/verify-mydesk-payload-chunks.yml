@@ -1,0 +1,38 @@
+name: Verify MyDesk Payload Chunks
+on:
+  push:
+    branches: [ "mydesk-ai-apk-build" ]
+    paths:
+      - '.github/workflows/verify-mydesk-payload-chunks.yml'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hash chunks
+        run: |
+          python3 - <<'PY'
+          import hashlib,re
+          from pathlib import Path
+          expected={
+            '01':'b77168894f07fac134bdd2f772aa2498adc9592ade20ef70e10c9b2eeaa840a6',
+            '02':'a53d8ab06658de7fa2a48f743e03e204592cc2dd83129c1edcc27606f066781b',
+            '03A':'156cc55604a1c80ea1085bbffaf6931f155ee7db552daf3241216a8e2a6519a9',
+            '03B':'e3675feb8e069bc767156ff70d6c74d27ada267a563a9023d91f0dc7f7fede8a',
+            '03C':'b929f41820cdaaf4a35905659406880cea0cc5924306cccf3d4424335193',
+            '04':'364fbcf5c71e9c1c3f6da5533fd943309ed4b36fa3cb58ae7e8406595f22095e',
+            '05':'c6bb14fe1a3053aa6939fb2710792f39661f666c7d58b90c18afc1e65bdfe3dc',
+          }
+          bad=[]
+          for suffix,want in expected.items():
+            p=Path('mydesk-windows')/f'CommonPatch042Part{suffix}.cs'
+            text=p.read_text(encoding='utf-8')
+            m=re.search(r'"([A-Za-z0-9+/=]+)"',text)
+            if not m: raise SystemExit(f'missing string {suffix}')
+            v=m.group(1); got=hashlib.sha256(v.encode()).hexdigest()
+            print(suffix,len(v),got,'PASS' if got==want else 'FAIL')
+            if got!=want: bad.append(suffix)
+          if bad: raise SystemExit('bad chunks: '+','.join(bad))
+          PY
