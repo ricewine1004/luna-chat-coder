@@ -558,23 +558,40 @@ internal static class CommonUpdateDeployer
     private static async Task<(int ExitCode, string Output)> RunCmdAsync(string commandPath, string arguments, string workDir, int timeoutMs)
     {
         string comspec = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-        var psi = new ProcessStartInfo
+        string runnerName = ".mydesk-cmd-" + Guid.NewGuid().ToString("N") + ".cmd";
+        string runnerPath = Path.Combine(workDir, runnerName);
+        string safeCommandPath = commandPath.Replace("\"", "\"\"");
+
+        try
         {
-            FileName = comspec,
-            WorkingDirectory = workDir,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-        psi.ArgumentList.Add("/d");
-        psi.ArgumentList.Add("/s");
-        psi.ArgumentList.Add("/c");
-        psi.ArgumentList.Add($"\"{commandPath}\" {arguments}");
-        return await RunProcessAsync(psi, timeoutMs);
+            string script =
+                "@echo off\r\n" +
+                "chcp 65001 >nul\r\n" +
+                "call \"" + safeCommandPath + "\" " + arguments + "\r\n" +
+                "exit /b %errorlevel%\r\n";
+            File.WriteAllText(runnerPath, script, new UTF8Encoding(false));
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = comspec,
+                WorkingDirectory = workDir,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
+            psi.ArgumentList.Add("/d");
+            psi.ArgumentList.Add("/c");
+            psi.ArgumentList.Add(runnerName);
+            return await RunProcessAsync(psi, timeoutMs);
+        }
+        finally
+        {
+            try { if (File.Exists(runnerPath)) File.Delete(runnerPath); } catch { }
+        }
     }
 
     private static async Task<(int ExitCode, string Output)> RunProcessAsync(ProcessStartInfo psi, int timeoutMs)
